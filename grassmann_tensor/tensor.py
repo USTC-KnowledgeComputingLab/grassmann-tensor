@@ -457,20 +457,17 @@ class GrassmannTensor:
         if tensor_b.arrow[-2] is not False:
             tensor_b = tensor_b.reverse((tensor_b.tensor.dim() - 2,))
 
-        broadcast_a = tensor_a.tensor.dim() - 2
-        broadcast_b = tensor_b.tensor.dim() - 2
-
         arrow = []
         edges = []
-        for i in range(-max(broadcast_a, broadcast_b), 0):
+        for i in range(-max(tensor_a.tensor.dim(), tensor_b.tensor.dim()), -2):
             arrow.append(False)
             candidate_a = candidate_b = 1
-            if i >= -broadcast_a:
-                candidate_a = tensor_a.edges[i - 2][0]
-            if i >= -broadcast_b:
-                candidate_b = tensor_b.edges[i - 2][0]
+            if i >= -tensor_a.tensor.dim():
+                candidate_a, _ = tensor_a.edges[i]
+            if i >= -tensor_b.tensor.dim():
+                candidate_b, _ = tensor_b.edges[i]
             assert candidate_a == candidate_b or candidate_a == 1 or candidate_b == 1, (
-                f"Cannot broadcast edges {tensor_a.edges[i - 2]} and {tensor_b.edges[i - 2]}."
+                f"Cannot broadcast edges {tensor_a.edges[i]} and {tensor_b.edges[i]}."
             )
             edges.append((max(candidate_a, candidate_b), 0))
         if not vector_a:
