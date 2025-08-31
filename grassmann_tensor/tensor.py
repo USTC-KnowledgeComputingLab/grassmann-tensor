@@ -300,10 +300,8 @@ class GrassmannTensor:
                 assert all(self_arrow == arrow[-1] for self_arrow in self.arrow[cursor_self:new_cursor_self]), f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
                 edges.append((even, odd))
                 shape.append(total)
-                if cursor_self + 1 != new_cursor_self:
-                    # Really something merged, otherwise no need to reorder or sign, which helps to avoid unnecessary operation for performance
-                    merging_sign.append((cursor_plan, sign))
-                    merging_reorder.append((cursor_plan, reorder))
+                merging_sign.append((cursor_plan, sign))
+                merging_reorder.append((cursor_plan, reorder))
                 cursor_self = new_cursor_self
                 cursor_plan += 1
             else:
