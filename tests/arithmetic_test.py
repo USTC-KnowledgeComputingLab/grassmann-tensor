@@ -220,29 +220,29 @@ def test_arithmetic_fail(mismatch_tensors: tuple[GrassmannTensor, GrassmannTenso
     tensor_a, tensor_b = mismatch_tensors
 
     # Test __add__ method.
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_a + tensor_b
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_c = tensor_a.clone()
         tensor_c += tensor_b
 
     # Test __sub__ method.
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_a - tensor_b
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_c = tensor_a.clone()
         tensor_c -= tensor_b
 
     # Test __mul__ method.
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_a * tensor_b
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_c = tensor_a.clone()
         tensor_c *= tensor_b
 
     # Test __truediv__ method.
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_a / tensor_b
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must match for arithmetic operations"):
         tensor_c = tensor_a.clone()
         tensor_c /= tensor_b
