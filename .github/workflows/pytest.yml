@@ -6,15 +6,26 @@ on:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
+
+      - name: Show Python
+        run: |
+          python -V
+          python -c "import sys,platform;print('executable=',sys.executable);print('platform=',platform.platform())"
 
       - name: Install dependencies
         run: pip install '.[dev]'
@@ -25,3 +36,4 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          flags: os-${{ matrix.os }}, python-${{ matrix.python-version }}
