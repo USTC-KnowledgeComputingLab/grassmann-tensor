@@ -8,7 +8,7 @@ dynamic = ["version"]
 dependencies = [
   "torch",
 ]
-requires-python = ">=3"
+requires-python = ">=3.10"
 authors = [{ email = "hzhangxyz@outlook.com", name = "Hao Zhang" }]
 description = "A Grassmann algebra tensor package"
 readme = "README.md"
@@ -16,21 +16,17 @@ license = "GPL-3.0-or-later"
 
 [project.optional-dependencies]
 dev = [
-  "yapf",
   "pylint",
   "mypy",
   "pytest",
   "pytest-cov",
+  "ruff",
 ]
 
 [tool.setuptools_scm]
 version_file = "grassmann_tensor/_version.py"
 version_scheme = "no-guess-dev"
 fallback_version = "0.0.0"
-
-[tool.yapf]
-based_on_style = "google"
-column_limit = 200
 
 [tool.pylint]
 max-line-length = 200
@@ -47,7 +43,7 @@ check_untyped_defs = true
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
