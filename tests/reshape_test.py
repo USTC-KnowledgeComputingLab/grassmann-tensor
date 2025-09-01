@@ -119,7 +119,7 @@ def test_reshape_splitting_shape_exceeds() -> None:
         _ = a.reshape(((1, 1), (1, 1)))
 
 
-def test_reshape_equal_eddges_trivial() -> None:
+def test_reshape_equal_edges_trivial() -> None:
     arrow = (True,)
     edges = ((2, 2),)
     a = GrassmannTensor(arrow, edges, torch.randn([4]))
@@ -127,28 +127,28 @@ def test_reshape_equal_eddges_trivial() -> None:
     _ = a.reshape(((2, 2),))
 
 
-def test_reshape_equal_eddges_nontrivial_splitting() -> None:
+def test_reshape_equal_edges_nontrivial_splitting() -> None:
     arrow = (True,)
     edges = ((1, 3),)
     a = GrassmannTensor(arrow, edges, torch.randn([4]))
     _ = a.reshape(((3, 1), (1, 0), (0, 1)))
 
 
-def test_reshape_equal_eddges_nontrivial_splitting_with_other_edge() -> None:
+def test_reshape_equal_edges_nontrivial_splitting_with_other_edge() -> None:
     arrow = (True, True)
     edges = ((1, 3), (2, 2))
     a = GrassmannTensor(arrow, edges, torch.randn([4, 4]))
     _ = a.reshape(((3, 1), (1, 0), (0, 1), (2, 2)))
 
 
-def test_reshape_equal_eddges_nontrivial_merging() -> None:
+def test_reshape_equal_edges_nontrivial_merging() -> None:
     arrow = (True, True, True)
     edges = ((1, 3), (1, 0), (0, 1))
     a = GrassmannTensor(arrow, edges, torch.randn([4, 1, 1]))
     _ = a.reshape(((3, 1),))
 
 
-def test_reshape_equal_eddges_nontrivial_merging_with_other_edge() -> None:
+def test_reshape_equal_edges_nontrivial_merging_with_other_edge() -> None:
     arrow = (True, True, True, True)
     edges = ((1, 3), (1, 0), (0, 1), (2, 2))
     a = GrassmannTensor(arrow, edges, torch.randn([4, 1, 1, 4]))
