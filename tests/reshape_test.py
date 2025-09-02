@@ -18,8 +18,8 @@ def test_reshape_consistency(arrow: tuple[bool, ...], plan_range: tuple[int, int
     assert torch.allclose(a.tensor, c.tensor)
 
 
-def insert_trivial_between_elements(input_list: list[tuple[int, int]], p: float) -> list[tuple[int, int]]:
-    result = []
+def insert_trivial_between_elements(input_list: list[tuple[int, int] | int], p: float) -> list[tuple[int, int] | int]:
+    result: list[tuple[int, int] | int] = []
     for i in input_list:
         if random.random() < p:
             result.append((1, 0))
