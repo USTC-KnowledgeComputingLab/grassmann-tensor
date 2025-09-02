@@ -256,7 +256,7 @@ class GrassmannTensor:
         cursor_plan: int = 0
         cursor_self: int = 0
         while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
-            if new_shape[cursor_plan] == -1:
+            if cursor_plan != len(new_shape) and new_shape[cursor_plan] == -1:
                 # Does not change
                 arrow.append(self.arrow[cursor_self])
                 edges.append(self.edges[cursor_self])
@@ -264,14 +264,14 @@ class GrassmannTensor:
                 cursor_self += 1
                 cursor_plan += 1
                 continue
-            if new_shape[cursor_plan] == (1, 0):
+            if cursor_plan != len(new_shape) and new_shape[cursor_plan] == (1, 0):
                 # An trivial plan edge
                 arrow.append(False)
                 edges.append((1, 0))
                 shape.append(1)
                 cursor_plan += 1
                 continue
-            if self.edges[cursor_self] == (1, 0):
+            if cursor_self != self.tensor.dim() and self.edges[cursor_self] == (1, 0):
                 # An trivial self edge
                 cursor_self += 1
                 continue
