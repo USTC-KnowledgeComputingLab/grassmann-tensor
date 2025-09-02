@@ -27,8 +27,7 @@ jobs:
 
       - name: Show Python
         run: |
-          python -V
-          python -c "import sys,platform;print('executable=',sys.executable);print('platform=',platform.platform())"
+          python -c "import sys, platform; print(f'Executable: {sys.executable}\nVersion: {platform.python_version()}\nImplementation: {platform.python_implementation()}\nPlatform: {platform.platform()}')"
 
       - name: Install dependencies
         run: pip install '.[dev]'
