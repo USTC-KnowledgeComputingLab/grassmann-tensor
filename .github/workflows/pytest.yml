@@ -4,17 +4,29 @@ on:
   - pull_request
   - push
 
+permissions:
+  contents: read
+
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
+
+      - name: Show Python
+        run: |
+          python -c "import sys, platform; print(f'Executable: {sys.executable}\nVersion: {platform.python_version()}\nImplementation: {platform.python_implementation()}\nPlatform: {platform.platform()}')"
 
       - name: Install dependencies
         run: pip install '.[dev]'
@@ -25,3 +37,4 @@ jobs:
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          flags: os-${{ matrix.os }}, python-${{ matrix.python-version }}

@@ -20,7 +20,7 @@ def test_creation_success(x: Initialization) -> None:
     ((False, True), ((1, 1), (2, 2), (1, 1)), torch.randn([2, 4, 2])),
 ])
 def test_creation_invalid_arrow(x: Initialization) -> None:
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="Arrow length"):
         GrassmannTensor(*x)
 
 
@@ -30,7 +30,7 @@ def test_creation_invalid_arrow(x: Initialization) -> None:
     ((False, True, False), ((1, 1), (1, 1)), torch.randn([2, 4, 2])),
 ])
 def test_creation_invalid_edges(x: Initialization) -> None:
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="Edges length"):
         GrassmannTensor(*x)
 
 
@@ -40,5 +40,5 @@ def test_creation_invalid_edges(x: Initialization) -> None:
     ((False, True, False), ((1, 1), (2, 2), (1, 1)), torch.randn([4, 4, 2])),
 ])
 def test_creation_invalid_shape(x: Initialization) -> None:
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="must equal sum of"):
         GrassmannTensor(*x)

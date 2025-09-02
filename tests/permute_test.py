@@ -24,18 +24,18 @@ def test_permute(x: PermuteCase) -> None:
     assert torch.allclose(result.tensor, expected)
 
 
-PermuteFailCase = tuple[tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor, tuple[int, ...]]
+PermuteFailCase = tuple[tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor, tuple[int, ...], str]
 
 
 @pytest.mark.parametrize("x", [
-    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (0, 0)),
-    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (2, 0)),
-    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (0, 0, 1)),
+    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (0, 0), "Permutation indices must be unique"),
+    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (2, 0), "Permutation indices must cover all dimensions"),
+    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (0, 0, 1), "Permutation indices must be unique"),
 ])
 def test_permute_fail(x: PermuteFailCase) -> None:
-    arrow, edges, tensor, before_by_after = x
+    arrow, edges, tensor, before_by_after, message = x
     grassmann_tensor = GrassmannTensor(arrow, edges, tensor)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=message):
         grassmann_tensor.permute(before_by_after)
 
 
