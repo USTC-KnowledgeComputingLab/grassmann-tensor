@@ -244,8 +244,6 @@ class GrassmannTensor:
         # 5. Apply the sign for merging
         # 6. Reorder the indices for merging
 
-        # pylint: disable=too-many-branches, too-many-locals, too-many-statements, too-many-nested-blocks
-
         arrow: list[bool] = []
         edges: list[tuple[int, int]] = []
         shape: list[int] = []
