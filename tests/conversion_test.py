@@ -52,9 +52,9 @@ def test_conversion(
 
 
 def test_conversion_duplicated_value(x: GrassmannTensor) -> None:
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="Duplicate device specification"):
         x.to(torch.device("cpu"), device=torch.device("cpu"))
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="Duplicate dtype specification"):
         x.to(torch.complex128, dtype=torch.complex128)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="Duplicate device specification"):
         x.to("cpu", device=torch.device("cpu"))

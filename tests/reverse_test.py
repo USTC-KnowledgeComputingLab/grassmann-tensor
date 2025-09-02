@@ -27,15 +27,15 @@ def test_reverse(x: ReverseCase) -> None:
     assert torch.allclose(result.tensor, expected)
 
 
-ReverseFailCase = tuple[tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor, tuple[int, ...]]
+ReverseFailCase = tuple[tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor, tuple[int, ...], str]
 
 
 @pytest.mark.parametrize("x", [
-    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (0, 0)),
-    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (2,)),
+    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (0, 0), "Indices must be unique"),
+    ((False, False), ((1, 1), (1, 1)), torch.tensor([[1, 0], [0, 4]]), (2,), "Indices must be within tensor dimensions"),
 ])
 def test_reverse_fail(x: ReverseFailCase) -> None:
-    arrow, edges, tensor, reverse_by = x
+    arrow, edges, tensor, reverse_by, message = x
     grassmann_tensor = GrassmannTensor(arrow, edges, tensor)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=message):
         grassmann_tensor.reverse(reverse_by)
