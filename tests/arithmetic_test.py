@@ -5,52 +5,69 @@ import torch
 from grassmann_tensor import GrassmannTensor
 
 
-@pytest.fixture(params=[
-    (
-        GrassmannTensor((False, False), ((2, 2), (1, 3)), torch.randn([4, 4])),
-        GrassmannTensor((False, False), ((2, 2), (1, 3)), torch.randn([4, 4])),
-    ),
-    (
-        GrassmannTensor((True, False, True), ((1, 1), (2, 2), (3, 1)), torch.randn([2, 4, 4])),
-        GrassmannTensor((True, False, True), ((1, 1), (2, 2), (3, 1)), torch.randn([2, 4, 4])),
-    ),
-    (
-        GrassmannTensor((True, True, False, False), ((1, 2), (2, 2), (1, 1), (3, 1)), torch.randn([3, 4, 2, 4])),
-        GrassmannTensor((True, True, False, False), ((1, 2), (2, 2), (1, 1), (3, 1)), torch.randn([3, 4, 2, 4])),
-    ),
-])
+@pytest.fixture(
+    params=[
+        (
+            GrassmannTensor((False, False), ((2, 2), (1, 3)), torch.randn([4, 4])),
+            GrassmannTensor((False, False), ((2, 2), (1, 3)), torch.randn([4, 4])),
+        ),
+        (
+            GrassmannTensor((True, False, True), ((1, 1), (2, 2), (3, 1)), torch.randn([2, 4, 4])),
+            GrassmannTensor((True, False, True), ((1, 1), (2, 2), (3, 1)), torch.randn([2, 4, 4])),
+        ),
+        (
+            GrassmannTensor(
+                (True, True, False, False),
+                ((1, 2), (2, 2), (1, 1), (3, 1)),
+                torch.randn([3, 4, 2, 4]),
+            ),
+            GrassmannTensor(
+                (True, True, False, False),
+                ((1, 2), (2, 2), (1, 1), (3, 1)),
+                torch.randn([3, 4, 2, 4]),
+            ),
+        ),
+    ]
+)
 def tensors(request: pytest.FixtureRequest) -> tuple[GrassmannTensor, GrassmannTensor]:
     return request.param
 
 
-@pytest.fixture(params=[
-    (
-        GrassmannTensor((False, False), ((2, 2), (1, 3)), torch.randn([4, 4])),
-        GrassmannTensor((False,), ((2, 2),), torch.randn([4])),
-    ),
-    (
-        GrassmannTensor((True, False, True), ((1, 1), (2, 2), (3, 1)), torch.randn([2, 4, 4])),
-        GrassmannTensor((True, False, True), ((1, 2), (2, 2), (3, 1)), torch.randn([3, 4, 4])),
-    ),
-    (
-        GrassmannTensor((True, True, False), ((1, 2), (2, 2), (3, 1)), torch.randn([3, 4, 4])),
-        GrassmannTensor((True, True, False, False), ((3, 2), (2, 2), (1, 1), (3, 1)), torch.randn([5, 4, 2, 4])),
-    ),
-])
+@pytest.fixture(
+    params=[
+        (
+            GrassmannTensor((False, False), ((2, 2), (1, 3)), torch.randn([4, 4])),
+            GrassmannTensor((False,), ((2, 2),), torch.randn([4])),
+        ),
+        (
+            GrassmannTensor((True, False, True), ((1, 1), (2, 2), (3, 1)), torch.randn([2, 4, 4])),
+            GrassmannTensor((True, False, True), ((1, 2), (2, 2), (3, 1)), torch.randn([3, 4, 4])),
+        ),
+        (
+            GrassmannTensor((True, True, False), ((1, 2), (2, 2), (3, 1)), torch.randn([3, 4, 4])),
+            GrassmannTensor(
+                (True, True, False, False),
+                ((3, 2), (2, 2), (1, 1), (3, 1)),
+                torch.randn([5, 4, 2, 4]),
+            ),
+        ),
+    ]
+)
 def mismatch_tensors(request: pytest.FixtureRequest) -> tuple[GrassmannTensor, GrassmannTensor]:
     return request.param
 
 
-@pytest.fixture(params=[
-    torch.randn([]),
-    torch.randn([]).item(),
-])
+@pytest.fixture(
+    params=[
+        torch.randn([]),
+        torch.randn([]).item(),
+    ]
+)
 def scalar(request: pytest.FixtureRequest) -> torch.Tensor | float:
     return request.param
 
 
 class FakeTensor:
-
     def __init__(self) -> None:
         pass
 
@@ -106,15 +123,20 @@ class FakeTensor:
 @pytest.mark.parametrize(
     "unsupported_type",
     [
-        "string",  #string
-        None,  #NoneType
-        {"key", "value"},  #dict
-        [1, 2, 3],  #list
-        {1, 2},  #set
-        object(),  #arbitrary object
-        FakeTensor(),  #an ill defined tensor-like object
-    ])
-def test_arithmetic(unsupported_type: typing.Any, tensors: tuple[GrassmannTensor, GrassmannTensor], scalar: torch.Tensor | float) -> None:
+        "string",  # string
+        None,  # NoneType
+        {"key", "value"},  # dict
+        [1, 2, 3],  # list
+        {1, 2},  # set
+        object(),  # arbitrary object
+        FakeTensor(),  # an ill defined tensor-like object
+    ],
+)
+def test_arithmetic(
+    unsupported_type: typing.Any,
+    tensors: tuple[GrassmannTensor, GrassmannTensor],
+    scalar: torch.Tensor | float,
+) -> None:
     tensor_a, tensor_b = tensors
 
     # Test __pos__ method.

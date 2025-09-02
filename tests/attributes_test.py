@@ -5,17 +5,19 @@ from grassmann_tensor import GrassmannTensor
 Initialization = tuple[tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor]
 
 
-@pytest.fixture(params=[
-    ((False, False), ((2, 2), (2, 2)), torch.randn([4, 4])),
-    ((False, True), ((2, 2), (1, 3)), torch.randn([4, 4])),
-    ((False, True), ((2, 0), (1, 3)), torch.randn([2, 4])),
-    ((True, False), ((0, 2), (1, 3)), torch.randn([2, 4])),
-    ((True, False), ((0, 0), (1, 3)), torch.randn([0, 4])),
-    ((True,), ((2, 0),), torch.randn([2])),
-    ((False,), ((0, 2),), torch.randn([2])),
-    ((), (), torch.randn([])),
-    ((False, False, True), ((2, 2), (1, 3), (4, 0)), torch.randn([4, 4, 4])),
-])
+@pytest.fixture(
+    params=[
+        ((False, False), ((2, 2), (2, 2)), torch.randn([4, 4])),
+        ((False, True), ((2, 2), (1, 3)), torch.randn([4, 4])),
+        ((False, True), ((2, 0), (1, 3)), torch.randn([2, 4])),
+        ((True, False), ((0, 2), (1, 3)), torch.randn([2, 4])),
+        ((True, False), ((0, 0), (1, 3)), torch.randn([0, 4])),
+        ((True,), ((2, 0),), torch.randn([2])),
+        ((False,), ((0, 2),), torch.randn([2])),
+        ((), (), torch.randn([])),
+        ((False, False, True), ((2, 2), (1, 3), (4, 0)), torch.randn([4, 4, 4])),
+    ]
+)
 def x(request: pytest.FixtureRequest) -> Initialization:
     return request.param
 
@@ -50,7 +52,9 @@ def test_mask(x: Initialization) -> None:
     tensor = GrassmannTensor(*x)
     assert tensor.mask.shape == tensor.tensor.shape
     assert tensor.mask.dtype == torch.bool
-    for indices in zip(*torch.unravel_index(torch.arange(tensor.tensor.numel()), tensor.tensor.shape)):
+    for indices in zip(
+        *torch.unravel_index(torch.arange(tensor.tensor.numel()), tensor.tensor.shape)
+    ):
         mask = tensor.mask[indices]
         expect = False
         for rank, parity in enumerate(tensor.parity):
