@@ -47,7 +47,10 @@ def test_conversion(
     assert y.arrow == x.arrow
     assert y.edges == x.edges
     assert y.tensor.dtype == torch.complex128 if dtype_arg != "none" else torch.float32
-    assert y.tensor.device.type == (torch.device(device_str) if device_arg != "none" else torch.device("cpu:0")).type
+    assert (
+        y.tensor.device.type
+        == (torch.device(device_str) if device_arg != "none" else torch.device("cpu:0")).type
+    )
     assert torch.allclose(y.tensor, x.tensor.to(dtype=y.tensor.dtype, device=y.tensor.device))
 
 

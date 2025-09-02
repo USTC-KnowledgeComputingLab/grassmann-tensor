@@ -64,7 +64,13 @@ class GrassmannTensor:
             self._mask = self._tensor_mask()
         return self._mask
 
-    def to(self, whatever: torch.device | torch.dtype | str | None = None, *, device: torch.device | None = None, dtype: torch.dtype | None = None) -> GrassmannTensor:
+    def to(
+        self,
+        whatever: torch.device | torch.dtype | str | None = None,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> GrassmannTensor:
         """
         Copy the tensor to a specified device or copy it to a specified data type.
         """
@@ -92,14 +98,18 @@ class GrassmannTensor:
                 return dataclasses.replace(
                     self,
                     _tensor=self._tensor.to(device=device),
-                    _parity=tuple(p.to(device) for p in self._parity) if self._parity is not None else None,
+                    _parity=tuple(p.to(device) for p in self._parity)
+                    if self._parity is not None
+                    else None,
                     _mask=self._mask.to(device) if self._mask is not None else None,
                 )
             case _:
                 return dataclasses.replace(
                     self,
                     _tensor=self._tensor.to(device=device, dtype=dtype),
-                    _parity=tuple(p.to(device=device) for p in self._parity) if self._parity is not None else None,
+                    _parity=tuple(p.to(device=device) for p in self._parity)
+                    if self._parity is not None
+                    else None,
                     _mask=self._mask.to(device=device) if self._mask is not None else None,
                 )
 
@@ -114,8 +124,12 @@ class GrassmannTensor:
         """
         Permute the indices of the Grassmann tensor.
         """
-        assert len(before_by_after) == len(set(before_by_after)), "Permutation indices must be unique."
-        assert set(before_by_after) == set(range(self.tensor.dim())), "Permutation indices must cover all dimensions."
+        assert len(before_by_after) == len(set(before_by_after)), (
+            "Permutation indices must be unique."
+        )
+        assert set(before_by_after) == set(range(self.tensor.dim())), (
+            "Permutation indices must cover all dimensions."
+        )
 
         arrow = tuple(self.arrow[i] for i in before_by_after)
         edges = tuple(self.edges[i] for i in before_by_after)
@@ -126,10 +140,14 @@ class GrassmannTensor:
         total_parity = functools.reduce(
             torch.logical_xor,
             (
-                torch.logical_and(self._unsqueeze(parity[i], i, self.tensor.dim()), self._unsqueeze(parity[j], j, self.tensor.dim()))
+                torch.logical_and(
+                    self._unsqueeze(parity[i], i, self.tensor.dim()),
+                    self._unsqueeze(parity[j], j, self.tensor.dim()),
+                )
                 for j in range(self.tensor.dim())
                 for i in range(0, j)  # all 0 <= i < j < dim
-                if before_by_after[i] > before_by_after[j]),
+                if before_by_after[i] > before_by_after[j]
+            ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         tensor = torch.where(total_parity, -tensor, +tensor)
@@ -151,14 +169,20 @@ class GrassmannTensor:
         This package always applies it to the tensor with arrow as True.
         """
         assert len(set(indices)) == len(indices), f"Indices must be unique. Got {indices}."
-        assert all(0 <= i < self.tensor.dim() for i in indices), f"Indices must be within tensor dimensions. Got {indices}."
+        assert all(0 <= i < self.tensor.dim() for i in indices), (
+            f"Indices must be within tensor dimensions. Got {indices}."
+        )
 
         arrow = tuple(self.arrow[i] ^ i in indices for i in range(self.tensor.dim()))
         tensor = self.tensor
 
         total_parity = functools.reduce(
             torch.logical_xor,
-            (self._unsqueeze(parity, index, self.tensor.dim()) for index, parity in enumerate(self.parity) if index in indices and self.arrow[index]),
+            (
+                self._unsqueeze(parity, index, self.tensor.dim())
+                for index, parity in enumerate(self.parity)
+                if index in indices and self.arrow[index]
+            ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         tensor = torch.where(total_parity, -tensor, +tensor)
@@ -169,10 +193,15 @@ class GrassmannTensor:
             _tensor=tensor,
         )
 
-    def _reorder_indices(self, edges: tuple[tuple[int, int], ...]) -> tuple[int, int, torch.Tensor, torch.Tensor]:
+    def _reorder_indices(
+        self, edges: tuple[tuple[int, int], ...]
+    ) -> tuple[int, int, torch.Tensor, torch.Tensor]:
         parity = functools.reduce(
             torch.logical_xor,
-            (self._unsqueeze(self._edge_mask(even, odd), index, len(edges)) for index, (even, odd) in enumerate(edges)),
+            (
+                self._unsqueeze(self._edge_mask(even, odd), index, len(edges))
+                for index, (even, odd) in enumerate(edges)
+            ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         flatten_parity = parity.flatten()
@@ -182,7 +211,10 @@ class GrassmannTensor:
 
         total = functools.reduce(
             torch.add,
-            (self._unsqueeze(self._edge_mask(even, odd), index, len(edges)).to(dtype=torch.int16) for index, (even, odd) in enumerate(edges)),
+            (
+                self._unsqueeze(self._edge_mask(even, odd), index, len(edges)).to(dtype=torch.int16)
+                for index, (even, odd) in enumerate(edges)
+            ),
             torch.zeros([], dtype=torch.int16, device=self.tensor.device),
         )
         count = total * (total - 1)
@@ -246,7 +278,11 @@ class GrassmannTensor:
                 cursor_self += 1
                 continue
             cursor_new_shape = new_shape[cursor_plan]
-            total = cursor_new_shape if isinstance(cursor_new_shape, int) else cursor_new_shape[0] + cursor_new_shape[1]
+            total = (
+                cursor_new_shape
+                if isinstance(cursor_new_shape, int)
+                else cursor_new_shape[0] + cursor_new_shape[1]
+            )
             # one of total and shape[cursor_self] is not trivial, otherwise it should be handled before
             if total == self.tensor.shape[cursor_self]:
                 # We do not know whether it is merging or splitting, check more
@@ -286,18 +322,29 @@ class GrassmannTensor:
                     new_cursor_self += 1
                     # One dimension included, check if we can stop
                     if self_total == total:
-                        even, odd, reorder, sign = self._reorder_indices(self.edges[cursor_self:new_cursor_self])
+                        even, odd, reorder, sign = self._reorder_indices(
+                            self.edges[cursor_self:new_cursor_self]
+                        )
                         if isinstance(cursor_new_shape, tuple):
                             if (even, odd) == cursor_new_shape:
                                 break
                         else:
                             break
                     # For some reason we cannot stop here, continue to include more dimension, check something before continue
-                    assert self_total <= total, f"Dimension mismatch in merging with edges {self.edges} and new shape {new_shape}."
-                    assert new_cursor_self < self.tensor.dim(), f"New shape exceeds in merging with edges {self.edges} and new shape {new_shape}."
+                    assert self_total <= total, (
+                        f"Dimension mismatch in merging with edges {self.edges} and new shape {new_shape}."
+                    )
+                    assert new_cursor_self < self.tensor.dim(), (
+                        f"New shape exceeds in merging with edges {self.edges} and new shape {new_shape}."
+                    )
                 # The merging block [cursor_self, new_cursor_self) has been determined
                 arrow.append(self.arrow[cursor_self])
-                assert all(self_arrow == arrow[-1] for self_arrow in self.arrow[cursor_self:new_cursor_self]), f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
+                assert all(
+                    self_arrow == arrow[-1]
+                    for self_arrow in self.arrow[cursor_self:new_cursor_self]
+                ), (
+                    f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
+                )
                 edges.append((even, odd))
                 shape.append(total)
                 merging_sign.append((cursor_plan, sign))
@@ -311,18 +358,28 @@ class GrassmannTensor:
                 while True:
                     # Try to include more dimension from new_shape
                     new_cursor_new_shape = new_shape[new_cursor_plan]
-                    assert isinstance(new_cursor_new_shape, tuple), f"New shape must be a pair when splitting, got {new_cursor_new_shape}."
+                    assert isinstance(new_cursor_new_shape, tuple), (
+                        f"New shape must be a pair when splitting, got {new_cursor_new_shape}."
+                    )
                     plan_total *= new_cursor_new_shape[0] + new_cursor_new_shape[1]
                     new_cursor_plan += 1
                     # One dimension included, check if we can stop
                     if plan_total == self.tensor.shape[cursor_self]:
                         # new_shape block has been verified to be always tuple[int, int] before
-                        even, odd, reorder, sign = self._reorder_indices(typing.cast(tuple[tuple[int, int], ...], new_shape[cursor_plan:new_cursor_plan]))
+                        even, odd, reorder, sign = self._reorder_indices(
+                            typing.cast(
+                                tuple[tuple[int, int], ...], new_shape[cursor_plan:new_cursor_plan]
+                            )
+                        )
                         if (even, odd) == self.edges[cursor_self]:
                             break
                     # For some reason we cannot stop here, continue to include more dimension, check something before continue
-                    assert plan_total <= self.tensor.shape[cursor_self], f"Dimension mismatch in splitting with edges {self.edges} and new shape {new_shape}."
-                    assert new_cursor_plan < len(new_shape), f"New shape exceeds in splitting with edges {self.edges} and new shape {new_shape}."
+                    assert plan_total <= self.tensor.shape[cursor_self], (
+                        f"Dimension mismatch in splitting with edges {self.edges} and new shape {new_shape}."
+                    )
+                    assert new_cursor_plan < len(new_shape), (
+                        f"New shape exceeds in splitting with edges {self.edges} and new shape {new_shape}."
+                    )
                 # The splitting block [cursor_plan, new_cursor_plan) has been determined
                 for i in range(cursor_plan, new_cursor_plan):
                     # new_shape block has been verified to be always tuple[int, int] in the loop
@@ -344,7 +401,11 @@ class GrassmannTensor:
 
         splitting_parity = functools.reduce(
             torch.logical_xor,
-            (self._unsqueeze(sign, index, self.tensor.dim()) for index, sign in splitting_sign if self.arrow[index]),
+            (
+                self._unsqueeze(sign, index, self.tensor.dim())
+                for index, sign in splitting_sign
+                if self.arrow[index]
+            ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         tensor = torch.where(splitting_parity, -tensor, +tensor)
@@ -353,7 +414,11 @@ class GrassmannTensor:
 
         merging_parity = functools.reduce(
             torch.logical_xor,
-            (self._unsqueeze(sign, index, tensor.dim()) for index, sign in merging_sign if arrow[index]),
+            (
+                self._unsqueeze(sign, index, tensor.dim())
+                for index, sign in merging_sign
+                if arrow[index]
+            ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         tensor = torch.where(merging_parity, -tensor, +tensor)
@@ -382,8 +447,12 @@ class GrassmannTensor:
             tensor_b = tensor_b.reshape((-1, (1, 0)))
             vector_b = True
 
-        assert all(odd == 0 for (even, odd) in tensor_a.edges[:-2]), f"All edges except the last two must be pure even. Got {tensor_a.edges[:-2]}."
-        assert all(odd == 0 for (even, odd) in tensor_b.edges[:-2]), f"All edges except the last two must be pure even. Got {tensor_b.edges[:-2]}."
+        assert all(odd == 0 for (even, odd) in tensor_a.edges[:-2]), (
+            f"All edges except the last two must be pure even. Got {tensor_a.edges[:-2]}."
+        )
+        assert all(odd == 0 for (even, odd) in tensor_b.edges[:-2]), (
+            f"All edges except the last two must be pure even. Got {tensor_b.edges[:-2]}."
+        )
 
         if tensor_a.arrow[-1] is not True:
             tensor_a = tensor_a.reverse((tensor_a.tensor.dim() - 1,))
@@ -402,7 +471,9 @@ class GrassmannTensor:
                 candidate_a = tensor_a.edges[i - 2][0]
             if i >= -broadcast_b:
                 candidate_b = tensor_b.edges[i - 2][0]
-            assert candidate_a == candidate_b or candidate_a == 1 or candidate_b == 1, f"Cannot broadcast edges {tensor_a.edges[i - 2]} and {tensor_b.edges[i - 2]}."
+            assert candidate_a == candidate_b or candidate_a == 1 or candidate_b == 1, (
+                f"Cannot broadcast edges {tensor_a.edges[i - 2]} and {tensor_b.edges[i - 2]}."
+            )
             edges.append((max(candidate_a, candidate_b), 0))
         if not vector_a:
             arrow.append(tensor_a.arrow[-2])
@@ -423,21 +494,35 @@ class GrassmannTensor:
         )
 
     def __post_init__(self) -> None:
-        assert len(self._arrow) == self._tensor.dim(), f"Arrow length ({len(self._arrow)}) must match tensor dimensions ({self._tensor.dim()})."
-        assert len(self._edges) == self._tensor.dim(), f"Edges length ({len(self._edges)}) must match tensor dimensions ({self._tensor.dim()})."
+        assert len(self._arrow) == self._tensor.dim(), (
+            f"Arrow length ({len(self._arrow)}) must match tensor dimensions ({self._tensor.dim()})."
+        )
+        assert len(self._edges) == self._tensor.dim(), (
+            f"Edges length ({len(self._edges)}) must match tensor dimensions ({self._tensor.dim()})."
+        )
         for dim, (even, odd) in zip(self._tensor.shape, self._edges):
-            assert even >= 0 and odd >= 0 and dim == even + odd, f"Dimension {dim} must equal sum of even ({even}) and odd ({odd}) parts, and both must be non-negative."
+            assert even >= 0 and odd >= 0 and dim == even + odd, (
+                f"Dimension {dim} must equal sum of even ({even}) and odd ({odd}) parts, and both must be non-negative."
+            )
 
     def _unsqueeze(self, tensor: torch.Tensor, index: int, dim: int) -> torch.Tensor:
         return tensor.view([-1 if i == index else 1 for i in range(dim)])
 
     def _edge_mask(self, even: int, odd: int) -> torch.Tensor:
-        return torch.cat([torch.zeros(even, dtype=torch.bool, device=self.tensor.device), torch.ones(odd, dtype=torch.bool, device=self.tensor.device)])
+        return torch.cat(
+            [
+                torch.zeros(even, dtype=torch.bool, device=self.tensor.device),
+                torch.ones(odd, dtype=torch.bool, device=self.tensor.device),
+            ]
+        )
 
     def _tensor_mask(self) -> torch.Tensor:
         return functools.reduce(
             torch.logical_xor,
-            (self._unsqueeze(parity, index, self._tensor.dim()) for index, parity in enumerate(self.parity)),
+            (
+                self._unsqueeze(parity, index, self._tensor.dim())
+                for index, parity in enumerate(self.parity)
+            ),
             torch.zeros_like(self._tensor, dtype=torch.bool),
         )
 
@@ -445,8 +530,12 @@ class GrassmannTensor:
         """
         Validate that the edges of two ParityTensor instances are compatible for arithmetic operations.
         """
-        assert self._arrow == other.arrow, f"Arrows must match for arithmetic operations. Got {self._arrow} and {other.arrow}."
-        assert self._edges == other.edges, f"Edges must match for arithmetic operations. Got {self._edges} and {other.edges}."
+        assert self._arrow == other.arrow, (
+            f"Arrows must match for arithmetic operations. Got {self._arrow} and {other.arrow}."
+        )
+        assert self._edges == other.edges, (
+            f"Edges must match for arithmetic operations. Got {self._edges} and {other.edges}."
+        )
 
     def __pos__(self) -> GrassmannTensor:
         return dataclasses.replace(
@@ -639,7 +728,9 @@ class GrassmannTensor:
         return dataclasses.replace(
             self,
             _tensor=self._tensor.clone(),
-            _parity=tuple(parity.clone() for parity in self._parity) if self._parity is not None else None,
+            _parity=tuple(parity.clone() for parity in self._parity)
+            if self._parity is not None
+            else None,
             _mask=self._mask.clone() if self._mask is not None else None,
         )
 

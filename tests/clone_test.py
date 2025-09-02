@@ -37,7 +37,9 @@ def test_clone(
     if parity:
         assert cloned_tensor._parity is not None
         assert original_tensor._parity is not None
-        assert all(torch.equal(c, o) for c, o in zip(cloned_tensor._parity, original_tensor._parity))
+        assert all(
+            torch.equal(c, o) for c, o in zip(cloned_tensor._parity, original_tensor._parity)
+        )
     else:
         assert cloned_tensor._parity is original_tensor._parity
     if mask:
