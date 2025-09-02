@@ -205,8 +205,8 @@ class GrassmannTensor:
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         flatten_parity = parity.flatten()
-        even = (~flatten_parity).nonzero().squeeze()
-        odd = flatten_parity.nonzero().squeeze()
+        even = (~flatten_parity).nonzero().squeeze(-1)
+        odd = flatten_parity.nonzero().squeeze(-1)
         reorder = torch.cat([even, odd], dim=0)
 
         total = functools.reduce(
@@ -244,8 +244,6 @@ class GrassmannTensor:
         # 5. Apply the sign for merging
         # 6. Reorder the indices for merging
 
-        # pylint: disable=too-many-branches, too-many-locals, too-many-statements
-
         arrow: list[bool] = []
         edges: list[tuple[int, int]] = []
         shape: list[int] = []
@@ -257,7 +255,7 @@ class GrassmannTensor:
 
         cursor_plan: int = 0
         cursor_self: int = 0
-        while True:
+        while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
             if new_shape[cursor_plan] == -1:
                 # Does not change
                 arrow.append(self.arrow[cursor_self])
@@ -265,91 +263,132 @@ class GrassmannTensor:
                 shape.append(self.tensor.shape[cursor_self])
                 cursor_self += 1
                 cursor_plan += 1
-            else:
-                cursor_new_shape = new_shape[cursor_plan]
-                total = (
-                    cursor_new_shape
-                    if isinstance(cursor_new_shape, int)
-                    else cursor_new_shape[0] + cursor_new_shape[1]
-                )
-                if total >= self.tensor.shape[cursor_self]:
-                    # Merging
-                    new_cursor_self = cursor_self
-                    self_total = 1
-                    while True:
-                        self_total *= self.tensor.shape[new_cursor_self]
-                        new_cursor_self += 1
-                        if self_total == total:
-                            break
-                        assert self_total < total, (
-                            f"Dimension mismatch with edges {self.edges} and new shape {new_shape}."
-                        )
-                        assert new_cursor_self < self.tensor.dim(), (
-                            f"New shape {new_shape} exceeds tensor dimensions {self.tensor.dim()}."
-                        )
-                    even, odd, reorder, sign = self._reorder_indices(
-                        self.edges[cursor_self:new_cursor_self]
-                    )
-                    if isinstance(cursor_new_shape, tuple):
-                        assert (even, odd) == cursor_new_shape, (
-                            f"New even and odd number mismatch during merging {self.edges} to {new_shape}."
-                        )
+                continue
+            if new_shape[cursor_plan] == (1, 0):
+                # An trivial plan edge
+                arrow.append(False)
+                edges.append((1, 0))
+                shape.append(1)
+                cursor_plan += 1
+                continue
+            if self.edges[cursor_self] == (1, 0):
+                # An trivial self edge
+                cursor_self += 1
+                continue
+            cursor_new_shape = new_shape[cursor_plan]
+            total = (
+                cursor_new_shape
+                if isinstance(cursor_new_shape, int)
+                else cursor_new_shape[0] + cursor_new_shape[1]
+            )
+            # one of total and shape[cursor_self] is not trivial, otherwise it should be handled before
+            if total == self.tensor.shape[cursor_self]:
+                # We do not know whether it is merging or splitting, check more
+                if isinstance(cursor_new_shape, int) or cursor_new_shape == self.edges[cursor_self]:
+                    # If the new shape is exactly the same as the current edge, we treat it as no change
                     arrow.append(self.arrow[cursor_self])
-                    assert all(
-                        self_arrow == arrow[-1]
-                        for self_arrow in self.arrow[cursor_self:new_cursor_self]
-                    ), (
-                        f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
-                    )
-                    edges.append((even, odd))
-                    shape.append(total)
-                    if cursor_self + 1 != new_cursor_self:
-                        # Really something merged
-                        merging_sign.append((cursor_plan, sign))
-                        merging_reorder.append((cursor_plan, reorder))
-                    cursor_self = new_cursor_self
-                    cursor_plan += 1
-                else:
-                    # Splitting
-                    new_cursor_plan = cursor_plan
-                    plan_total = 1
-                    while True:
-                        new_cursor_new_shape = new_shape[new_cursor_plan]
-                        assert isinstance(new_cursor_new_shape, tuple), (
-                            f"New shape must be a pair when splitting, got {new_cursor_new_shape}."
-                        )
-                        plan_total *= new_cursor_new_shape[0] + new_cursor_new_shape[1]
-                        new_cursor_plan += 1
-                        if plan_total == self.tensor.shape[cursor_self]:
-                            break
-                        assert plan_total < self.tensor.shape[cursor_self], (
-                            f"Dimension mismatch with edges {self.edges} and new shape {new_shape}."
-                        )
-                        assert new_cursor_plan < len(new_shape), (
-                            f"New shape {new_shape} exceeds specified dimensions {len(new_shape)}."
-                        )
-                    # new_shape has been verified to be tuple[int, int] in the loop
-                    even, odd, reorder, sign = self._reorder_indices(
-                        typing.cast(
-                            tuple[tuple[int, int], ...], new_shape[cursor_plan:new_cursor_plan]
-                        )
-                    )
-                    assert (even, odd) == self.edges[cursor_self], (
-                        f"New even and odd number mismatch during splitting {self.edges[cursor_self]} to {new_shape[cursor_plan:new_cursor_plan]}."
-                    )
-                    for i in range(cursor_plan, new_cursor_plan):
-                        # new_shape has been verified to be tuple[int, int] in the loop
-                        new_cursor_new_shape = typing.cast(tuple[int, int], new_shape[i])
-                        arrow.append(self.arrow[cursor_self])
-                        edges.append(new_cursor_new_shape)
-                        shape.append(new_cursor_new_shape[0] + new_cursor_new_shape[1])
-                    splitting_reorder.append((cursor_self, reorder))
-                    splitting_sign.append((cursor_self, sign))
+                    edges.append(self.edges[cursor_self])
+                    shape.append(self.tensor.shape[cursor_self])
                     cursor_self += 1
-                    cursor_plan = new_cursor_plan
-
-            if cursor_plan == len(new_shape) and cursor_self == self.tensor.dim():
-                break
+                    cursor_plan += 1
+                    continue
+                # Let's see if there are (0, 1) edges in the remaining self edges, if yes, we treat it as merging, otherwise splitting
+                cursor_self_finding = cursor_self
+                cursor_self_found = False
+                while True:
+                    cursor_self_finding += 1
+                    if cursor_self_finding == self.tensor.dim():
+                        break
+                    if self.edges[cursor_self_finding] == (1, 0):
+                        continue
+                    if self.edges[cursor_self_finding] == (0, 1):
+                        cursor_self_found = True
+                        break
+                    break
+                merging = cursor_self_found
+            if total > self.tensor.shape[cursor_self]:
+                merging = True
+            if total < self.tensor.shape[cursor_self]:
+                merging = False
+            if merging:
+                # Merging between [cursor_self, new_cursor_self) and the another side contains dimension as self_total
+                new_cursor_self = cursor_self
+                self_total = 1
+                while True:
+                    # Try to include more dimension from self
+                    self_total *= self.tensor.shape[new_cursor_self]
+                    new_cursor_self += 1
+                    # One dimension included, check if we can stop
+                    if self_total == total:
+                        even, odd, reorder, sign = self._reorder_indices(
+                            self.edges[cursor_self:new_cursor_self]
+                        )
+                        if isinstance(cursor_new_shape, tuple):
+                            if (even, odd) == cursor_new_shape:
+                                break
+                        else:
+                            break
+                    # For some reason we cannot stop here, continue to include more dimension, check something before continue
+                    assert self_total <= total, (
+                        f"Dimension mismatch in merging with edges {self.edges} and new shape {new_shape}."
+                    )
+                    assert new_cursor_self < self.tensor.dim(), (
+                        f"New shape exceeds in merging with edges {self.edges} and new shape {new_shape}."
+                    )
+                # The merging block [cursor_self, new_cursor_self) has been determined
+                arrow.append(self.arrow[cursor_self])
+                assert all(
+                    self_arrow == arrow[-1]
+                    for self_arrow in self.arrow[cursor_self:new_cursor_self]
+                ), (
+                    f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
+                )
+                edges.append((even, odd))
+                shape.append(total)
+                merging_sign.append((cursor_plan, sign))
+                merging_reorder.append((cursor_plan, reorder))
+                cursor_self = new_cursor_self
+                cursor_plan += 1
+            else:
+                # Splitting between [cursor_plan, new_cursor_plan) and the another side contains dimension as plan_total
+                new_cursor_plan = cursor_plan
+                plan_total = 1
+                while True:
+                    # Try to include more dimension from new_shape
+                    new_cursor_new_shape = new_shape[new_cursor_plan]
+                    assert isinstance(new_cursor_new_shape, tuple), (
+                        f"New shape must be a pair when splitting, got {new_cursor_new_shape}."
+                    )
+                    plan_total *= new_cursor_new_shape[0] + new_cursor_new_shape[1]
+                    new_cursor_plan += 1
+                    # One dimension included, check if we can stop
+                    if plan_total == self.tensor.shape[cursor_self]:
+                        # new_shape block has been verified to be always tuple[int, int] before
+                        even, odd, reorder, sign = self._reorder_indices(
+                            typing.cast(
+                                tuple[tuple[int, int], ...], new_shape[cursor_plan:new_cursor_plan]
+                            )
+                        )
+                        if (even, odd) == self.edges[cursor_self]:
+                            break
+                    # For some reason we cannot stop here, continue to include more dimension, check something before continue
+                    assert plan_total <= self.tensor.shape[cursor_self], (
+                        f"Dimension mismatch in splitting with edges {self.edges} and new shape {new_shape}."
+                    )
+                    assert new_cursor_plan < len(new_shape), (
+                        f"New shape exceeds in splitting with edges {self.edges} and new shape {new_shape}."
+                    )
+                # The splitting block [cursor_plan, new_cursor_plan) has been determined
+                for i in range(cursor_plan, new_cursor_plan):
+                    # new_shape block has been verified to be always tuple[int, int] in the loop
+                    new_cursor_new_shape = typing.cast(tuple[int, int], new_shape[i])
+                    arrow.append(self.arrow[cursor_self])
+                    edges.append(new_cursor_new_shape)
+                    shape.append(new_cursor_new_shape[0] + new_cursor_new_shape[1])
+                splitting_reorder.append((cursor_self, reorder))
+                splitting_sign.append((cursor_self, sign))
+                cursor_self += 1
+                cursor_plan = new_cursor_plan
 
         tensor = self.tensor
 
