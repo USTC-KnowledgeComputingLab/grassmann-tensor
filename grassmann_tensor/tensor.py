@@ -256,31 +256,50 @@ class GrassmannTensor:
         cursor_plan: int = 0
         cursor_self: int = 0
         while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
-            if cursor_plan != len(new_shape) and new_shape[cursor_plan] == -1:
-                # Does not change
-                arrow.append(self.arrow[cursor_self])
-                edges.append(self.edges[cursor_self])
-                shape.append(self.tensor.shape[cursor_self])
-                cursor_self += 1
-                cursor_plan += 1
-                continue
-            if cursor_plan != len(new_shape) and new_shape[cursor_plan] == (1, 0):
-                # An trivial plan edge
-                arrow.append(False)
-                edges.append((1, 0))
-                shape.append(1)
-                cursor_plan += 1
-                continue
-            if cursor_self != self.tensor.dim() and self.edges[cursor_self] == (1, 0):
-                # An trivial self edge
-                cursor_self += 1
-                continue
-            cursor_new_shape = new_shape[cursor_plan]
-            total = (
-                cursor_new_shape
-                if isinstance(cursor_new_shape, int)
-                else cursor_new_shape[0] + cursor_new_shape[1]
-            )
+            if len(new_shape) == 0:
+                assert all(edge == (0, 1) or edge == (1, 0) for edge in self.edges), (
+                    f"Edge must be (0, 1) or (1, 0) but got {self.edges[cursor_self]}"
+                )
+                cursor_self = self.tensor.dim() - 1
+            else:
+                if cursor_plan != len(new_shape) and new_shape[cursor_plan] == -1:
+                    # Does not change
+                    arrow.append(self.arrow[cursor_self])
+                    edges.append(self.edges[cursor_self])
+                    shape.append(self.tensor.shape[cursor_self])
+                    cursor_self += 1
+                    cursor_plan += 1
+                    continue
+                if cursor_plan != len(new_shape) and new_shape[cursor_plan] == (1, 0):
+                    # A trivial plan edge
+                    arrow.append(False)
+                    edges.append((1, 0))
+                    shape.append(1)
+                    cursor_plan += 1
+                    continue
+                if cursor_self != self.tensor.dim() and edges[cursor_self] == (1, 0):
+                    # A trivial self edge
+                    cursor_self += 1
+                    continue
+                if cursor_plan != len(new_shape) and new_shape[cursor_plan] == (0, 1):
+                    arrow.append(False)
+                    edges.append((1, 0))
+                    shape.append(1)
+                    cursor_plan += 1
+                    continue
+                if cursor_self != self.tensor.dim() and edges[cursor_self] == (0, 1):
+                    cursor_self += 1
+                    continue
+            if len(new_shape) == 0:
+                cursor_new_shape = typing.cast(int | tuple[int, int], tuple())
+                total = 1
+            else:
+                cursor_new_shape = new_shape[cursor_plan]
+                total = (
+                    cursor_new_shape
+                    if isinstance(cursor_new_shape, int)
+                    else cursor_new_shape[0] + cursor_new_shape[1]
+                )
             # one of total and shape[cursor_self] is not trivial, otherwise it should be handled before
             if total == self.tensor.shape[cursor_self]:
                 # We do not know whether it is merging or splitting, check more
@@ -296,6 +315,9 @@ class GrassmannTensor:
                 cursor_self_finding = cursor_self
                 cursor_self_found = False
                 while True:
+                    if len(new_shape) == 0:
+                        cursor_self_found = True
+                        break
                     cursor_self_finding += 1
                     if cursor_self_finding == self.tensor.dim():
                         break
@@ -315,6 +337,10 @@ class GrassmannTensor:
                 new_cursor_self = cursor_self
                 self_total = 1
                 while True:
+                    if len(new_shape) == 0:
+                        new_cursor_self += 1
+                        even, odd, reorder, sign = self._reorder_indices(self.edges)
+                        break
                     # Try to include more dimension from self
                     self_total *= self.tensor.shape[new_cursor_self]
                     new_cursor_self += 1
@@ -348,7 +374,8 @@ class GrassmannTensor:
                 merging_sign.append((cursor_plan, sign))
                 merging_reorder.append((cursor_plan, reorder))
                 cursor_self = new_cursor_self
-                cursor_plan += 1
+                if len(new_shape) != 0:
+                    cursor_plan += 1
             else:
                 # Splitting between [cursor_plan, new_cursor_plan) and the another side contains dimension as plan_total
                 new_cursor_plan = cursor_plan
