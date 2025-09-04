@@ -2,9 +2,31 @@ import pytest
 import torch
 from grassmann_tensor import GrassmannTensor
 
-MatmulMatrixMatrixCase = tuple[bool, bool, tuple[int, int], tuple[int, int], tuple[int, int]]
+Broadcast = tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]
+MatmulCase = tuple[bool, bool, tuple[int, int], tuple[int, int], tuple[int, int]]
 
 
+@pytest.mark.parametrize("a_is_vector", [False, True])
+@pytest.mark.parametrize("b_is_vector", [False, True])
+@pytest.mark.parametrize("normal_arrow_order", [False, True])
+@pytest.mark.parametrize(
+    "broadcast",
+    [
+        ((), (), ()),
+        ((2,), (), (2,)),
+        ((), (3,), (3,)),
+        ((1,), (4,), (4,)),
+        ((5,), (1,), (5,)),
+        ((6,), (6,), (6,)),
+        ((7, 8), (7, 8), (7, 8)),
+        ((1, 8), (7, 8), (7, 8)),
+        ((8,), (7, 8), (7, 8)),
+        ((7, 1), (7, 8), (7, 8)),
+        ((7, 8), (1, 8), (7, 8)),
+        ((7, 8), (8,), (7, 8)),
+        ((7, 8), (7, 1), (7, 8)),
+    ],
+)
 @pytest.mark.parametrize(
     "x",
     [
@@ -18,195 +40,62 @@ MatmulMatrixMatrixCase = tuple[bool, bool, tuple[int, int], tuple[int, int], tup
         (True, True, (2, 2), (2, 2), (2, 2)),
     ],
 )
-def test_matmul_matrix_matrix_tf(x: MatmulMatrixMatrixCase) -> None:
+def test_matmul(
+    a_is_vector: bool,
+    b_is_vector: bool,
+    normal_arrow_order: bool,
+    broadcast: Broadcast,
+    x: MatmulCase,
+) -> None:
+    broadcast_a, broadcast_b, broadcast_result = broadcast
     arrow_a, arrow_b, edge_a, edge_common, edge_b = x
+    if a_is_vector and broadcast_a != ():
+        pytest.skip("Vector a cannot be broadcasted")
+    if b_is_vector and broadcast_b != ():
+        pytest.skip("Vector b cannot be broadcasted")
     dim_a = sum(edge_a)
     dim_common = sum(edge_common)
     dim_b = sum(edge_b)
-    a = GrassmannTensor(
-        (arrow_a, True), (edge_a, edge_common), torch.randn([dim_a, dim_common])
-    ).update_mask()
-    b = GrassmannTensor(
-        (False, arrow_b), (edge_common, edge_b), torch.randn([dim_common, dim_b])
-    ).update_mask()
+    if a_is_vector:
+        a = GrassmannTensor(
+            (*(False for _ in broadcast_a), True if normal_arrow_order else False),
+            (*((i, 0) for i in broadcast_a), edge_common),
+            torch.randn([*broadcast_a, dim_common]),
+        ).update_mask()
+    else:
+        a = GrassmannTensor(
+            (*(False for _ in broadcast_a), arrow_a, True if normal_arrow_order else False),
+            (*((i, 0) for i in broadcast_a), edge_a, edge_common),
+            torch.randn([*broadcast_a, dim_a, dim_common]),
+        ).update_mask()
+    if b_is_vector:
+        b = GrassmannTensor(
+            (*(False for _ in broadcast_b), False if normal_arrow_order else True),
+            (*((i, 0) for i in broadcast_b), edge_common),
+            torch.randn([*broadcast_b, dim_common]),
+        ).update_mask()
+    else:
+        b = GrassmannTensor(
+            (*(False for _ in broadcast_b), False if normal_arrow_order else True, arrow_b),
+            (*((i, 0) for i in broadcast_b), edge_common, edge_b),
+            torch.randn([*broadcast_b, dim_common, dim_b]),
+        ).update_mask()
     c = a.matmul(b)
     expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == (arrow_a, arrow_b)
-    assert c.edges == (edge_a, edge_b)
-    assert torch.allclose(c.tensor, expected)
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, False, (1, 1), (1, 1), (1, 1)),
-        (False, True, (1, 1), (1, 1), (1, 1)),
-        (True, False, (1, 1), (1, 1), (1, 1)),
-        (True, True, (1, 1), (1, 1), (1, 1)),
-        (False, False, (2, 2), (2, 2), (2, 2)),
-        (False, True, (2, 2), (2, 2), (2, 2)),
-        (True, False, (2, 2), (2, 2), (2, 2)),
-        (True, True, (2, 2), (2, 2), (2, 2)),
-    ],
-)
-def test_matmul_matrix_matrix_ft(x: MatmulMatrixMatrixCase) -> None:
-    arrow_a, arrow_b, edge_a, edge_common, edge_b = x
-    dim_a = sum(edge_a)
-    dim_common = sum(edge_common)
-    dim_b = sum(edge_b)
-    a = GrassmannTensor(
-        (arrow_a, False), (edge_a, edge_common), torch.randn([dim_a, dim_common])
-    ).update_mask()
-    b = GrassmannTensor(
-        (True, arrow_b), (edge_common, edge_b), torch.randn([dim_common, dim_b])
-    ).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    expected[edge_a[0] :, edge_b[0] :] *= -1
-    assert c.arrow == (arrow_a, arrow_b)
-    assert c.edges == (edge_a, edge_b)
-    assert torch.allclose(c.tensor, expected)
-
-
-MatmulMatrixVectorCase = tuple[bool, tuple[int, int], tuple[int, int]]
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, (1, 1), (1, 1)),
-        (True, (1, 1), (1, 1)),
-        (False, (2, 2), (2, 2)),
-        (True, (2, 2), (2, 2)),
-    ],
-)
-def test_matmul_matrix_vector_tf(x: MatmulMatrixVectorCase) -> None:
-    arrow_a, edge_a, edge_common = x
-    dim_a = sum(edge_a)
-    dim_common = sum(edge_common)
-    a = GrassmannTensor(
-        (arrow_a, True), (edge_a, edge_common), torch.randn([dim_a, dim_common])
-    ).update_mask()
-    b = GrassmannTensor((False,), (edge_common,), torch.randn([dim_common])).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == (arrow_a,)
-    assert c.edges == (edge_a,)
-    assert torch.allclose(c.tensor, expected)
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, (1, 1), (1, 1)),
-        (True, (1, 1), (1, 1)),
-        (False, (2, 2), (2, 2)),
-        (True, (2, 2), (2, 2)),
-    ],
-)
-def test_matmul_matrix_vector_ft(x: MatmulMatrixVectorCase) -> None:
-    arrow_a, edge_a, edge_common = x
-    dim_a = sum(edge_a)
-    dim_common = sum(edge_common)
-    a = GrassmannTensor(
-        (arrow_a, False), (edge_a, edge_common), torch.randn([dim_a, dim_common])
-    ).update_mask()
-    b = GrassmannTensor((True,), (edge_common,), torch.randn([dim_common])).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == (arrow_a,)
-    assert c.edges == (edge_a,)
-    assert torch.allclose(c.tensor, expected)
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, (1, 1), (1, 1)),
-        (True, (1, 1), (1, 1)),
-        (False, (2, 2), (2, 2)),
-        (True, (2, 2), (2, 2)),
-    ],
-)
-def test_matmul_vector_matrix_ft(x: MatmulMatrixVectorCase) -> None:
-    arrow_b, edge_common, edge_b = x
-    dim_common = sum(edge_common)
-    dim_b = sum(edge_b)
-    a = GrassmannTensor((False,), (edge_common,), torch.randn([dim_common])).update_mask()
-    b = GrassmannTensor(
-        (True, arrow_b), (edge_common, edge_b), torch.randn([dim_common, dim_b])
-    ).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == (arrow_b,)
-    assert c.edges == (edge_b,)
-    assert torch.allclose(c.tensor, expected)
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, (1, 1), (1, 1)),
-        (True, (1, 1), (1, 1)),
-        (False, (2, 2), (2, 2)),
-        (True, (2, 2), (2, 2)),
-    ],
-)
-def test_matmul_vector_matrix_tf(x: MatmulMatrixVectorCase) -> None:
-    arrow_b, edge_common, edge_b = x
-    dim_common = sum(edge_common)
-    dim_b = sum(edge_b)
-    a = GrassmannTensor((True,), (edge_common,), torch.randn([dim_common])).update_mask()
-    b = GrassmannTensor(
-        (False, arrow_b), (edge_common, edge_b), torch.randn([dim_common, dim_b])
-    ).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == (arrow_b,)
-    assert c.edges == (edge_b,)
-    assert torch.allclose(c.tensor, expected)
-
-
-MatmulVectorVectorCase = tuple[bool, tuple[int, int]]
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, (1, 1)),
-        (True, (1, 1)),
-        (False, (2, 2)),
-        (True, (2, 2)),
-    ],
-)
-def test_matmul_vector_vector_ft(x: MatmulVectorVectorCase) -> None:
-    arrow_b, edge_common = x
-    dim_common = sum(edge_common)
-    a = GrassmannTensor((False,), (edge_common,), torch.randn([dim_common])).update_mask()
-    b = GrassmannTensor((True,), (edge_common,), torch.randn([dim_common])).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == ()
-    assert c.edges == ()
-    assert torch.allclose(c.tensor, expected)
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        (False, (1, 1)),
-        (True, (1, 1)),
-        (False, (2, 2)),
-        (True, (2, 2)),
-    ],
-)
-def test_matmul_vector_vector_tf(x: MatmulVectorVectorCase) -> None:
-    arrow_b, edge_common = x
-    dim_common = sum(edge_common)
-    a = GrassmannTensor((True,), (edge_common,), torch.randn([dim_common])).update_mask()
-    b = GrassmannTensor((False,), (edge_common,), torch.randn([dim_common])).update_mask()
-    c = a.matmul(b)
-    expected = a.tensor.matmul(b.tensor)
-    assert c.arrow == ()
-    assert c.edges == ()
+    if not a_is_vector and not b_is_vector and not normal_arrow_order:
+        expected[..., edge_a[0] :, edge_b[0] :] *= -1
+    if a_is_vector:
+        if b_is_vector:
+            assert c.arrow == tuple(False for _ in broadcast_result)
+            assert c.edges == tuple((i, 0) for i in broadcast_result)
+        else:
+            assert c.arrow == (*(False for _ in broadcast_result), arrow_b)
+            assert c.edges == (*((i, 0) for i in broadcast_result), edge_b)
+    else:
+        if b_is_vector:
+            assert c.arrow == (*(False for _ in broadcast_result), arrow_a)
+            assert c.edges == (*((i, 0) for i in broadcast_result), edge_a)
+        else:
+            assert c.arrow == (*(False for _ in broadcast_result), arrow_a, arrow_b)
+            assert c.edges == (*((i, 0) for i in broadcast_result), edge_a, edge_b)
     assert torch.allclose(c.tensor, expected)

@@ -173,7 +173,7 @@ class GrassmannTensor:
             f"Indices must be within tensor dimensions. Got {indices}."
         )
 
-        arrow = tuple(self.arrow[i] ^ i in indices for i in range(self.tensor.dim()))
+        arrow = tuple(self.arrow[i] ^ (i in indices) for i in range(self.tensor.dim()))
         tensor = self.tensor
 
         total_parity = functools.reduce(
