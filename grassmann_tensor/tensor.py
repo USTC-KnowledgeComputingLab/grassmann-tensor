@@ -359,19 +359,25 @@ class GrassmannTensor:
                         f"New shape exceeds in merging with edges {self.edges} and new shape {new_shape}."
                     )
                 # The merging block [cursor_self, new_cursor_self) has been determined
-                arrow.append(self.arrow[cursor_self])
-                assert all(
-                    self_arrow == arrow[-1]
-                    for self_arrow in self.arrow[cursor_self:new_cursor_self]
-                ), (
-                    f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
-                )
-                edges.append((even, odd))
-                shape.append(total)
-                merging_sign.append((cursor_plan, sign))
-                merging_reorder.append((cursor_plan, reorder))
-                cursor_self = new_cursor_self
-                if len(new_shape) != 0:
+                if len(new_shape) == 0:
+                    arrow = []
+                    edges = []
+                    shape = []
+                    merging_sign.append((cursor_plan, sign))
+                    cursor_self = new_cursor_self
+                else:
+                    arrow.append(self.arrow[cursor_self])
+                    assert all(
+                        self_arrow == arrow[-1]
+                        for self_arrow in self.arrow[cursor_self:new_cursor_self]
+                    ), (
+                        f"Cannot merge edges with different arrows {self.arrow[cursor_self:new_cursor_self]}."
+                    )
+                    edges.append((even, odd))
+                    shape.append(total)
+                    merging_sign.append((cursor_plan, sign))
+                    merging_reorder.append((cursor_plan, reorder))
+                    cursor_self = new_cursor_self
                     cursor_plan += 1
             else:
                 # Splitting between [cursor_plan, new_cursor_plan) and the another side contains dimension as plan_total
@@ -445,6 +451,9 @@ class GrassmannTensor:
         tensor = torch.where(splitting_parity, -tensor, +tensor)
 
         tensor = tensor.reshape(shape)
+
+        if len(new_shape) == 0:
+            return GrassmannTensor(_arrow=tuple(arrow), _edges=tuple(edges), _tensor=tensor)
 
         merging_parity = functools.reduce(
             torch.logical_xor,

@@ -178,5 +178,7 @@ def test_reshape_equal_edges_nontrivial_merging_with_other_edge() -> None:
 
 
 def test_reshape_with_none() -> None:
-    _ = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
-    _ = GrassmannTensor((), (), torch.tensor(2333)).reshape(((0, 1), (0, 1))).reshape(())
+    a = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
+    assert len(a.arrow) == 0 and len(a.edges) == 0 and a.tensor.dim() == 0
+    b = GrassmannTensor((), (), torch.tensor(2333)).reshape(((0, 1), (0, 1))).reshape(())
+    assert len(b.arrow) == 0 and len(b.edges) == 0 and b.tensor.dim() == 0
