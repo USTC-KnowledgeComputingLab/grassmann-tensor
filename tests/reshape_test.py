@@ -63,7 +63,7 @@ def test_reshape_trivial_edges(arrow: tuple[bool, ...], plan_range: tuple[int, i
     assert a.edges == c.edges
 
 
-def test_reshape_merging_dimension_mismatch_edges_because_of_nonequal() -> None:
+def test_reshape_merging_dimension_mismatch_edges_because_of_unequal() -> None:
     arrow = (True, True, True)
     edges = ((2, 2), (8, 8), (2, 2))
     a = GrassmannTensor(arrow, edges, torch.randn([4, 16, 4]))
@@ -113,7 +113,7 @@ def test_reshape_splitting_shape_type() -> None:
         _ = a.reshape((2, (2, 2)))
 
 
-def test_reshape_splitting_dimension_mismatch_edges_because_of_nonequal() -> None:
+def test_reshape_splitting_dimension_mismatch_edges_because_of_unequal() -> None:
     arrow = (True,)
     edges = ((8, 8),)
     a = GrassmannTensor(arrow, edges, torch.randn([16]))
@@ -175,3 +175,10 @@ def test_reshape_equal_edges_nontrivial_merging_with_other_edge() -> None:
     edges = ((1, 3), (1, 0), (0, 1), (2, 2))
     a = GrassmannTensor(arrow, edges, torch.randn([4, 1, 1, 4]))
     _ = a.reshape(((3, 1), (2, 2)))
+
+
+def test_reshape_with_none() -> None:
+    a = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
+    assert len(a.arrow) == 0 and len(a.edges) == 0 and a.tensor.dim() == 0
+    b = GrassmannTensor((), (), torch.tensor(2333)).reshape(((0, 1), (0, 1))).reshape(())
+    assert len(b.arrow) == 0 and len(b.edges) == 0 and b.tensor.dim() == 0
