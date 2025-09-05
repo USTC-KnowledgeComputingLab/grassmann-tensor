@@ -258,7 +258,7 @@ class GrassmannTensor:
         while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
             if len(new_shape) == 0:
                 assert all(edge == (0, 1) or edge == (1, 0) for edge in self.edges), (
-                    f"Edge must be (0, 1) or (1, 0) but got {self.edges[cursor_self]}"
+                    f"Edge must be (0, 1) or (1, 0) but got {self.edges}"
                 )
                 cursor_self = self.tensor.dim() - 1
             else:
@@ -277,17 +277,8 @@ class GrassmannTensor:
                     shape.append(1)
                     cursor_plan += 1
                     continue
-                if cursor_self != self.tensor.dim() and edges[cursor_self] == (1, 0):
+                if cursor_self != self.tensor.dim() and self.edges[cursor_self] == (1, 0):
                     # A trivial self edge
-                    cursor_self += 1
-                    continue
-                if cursor_plan != len(new_shape) and new_shape[cursor_plan] == (0, 1):
-                    arrow.append(False)
-                    edges.append((1, 0))
-                    shape.append(1)
-                    cursor_plan += 1
-                    continue
-                if cursor_self != self.tensor.dim() and edges[cursor_self] == (0, 1):
                     cursor_self += 1
                     continue
             if len(new_shape) == 0:
@@ -301,37 +292,43 @@ class GrassmannTensor:
                     else cursor_new_shape[0] + cursor_new_shape[1]
                 )
             # one of total and shape[cursor_self] is not trivial, otherwise it should be handled before
-            if total == self.tensor.shape[cursor_self]:
-                # We do not know whether it is merging or splitting, check more
-                if isinstance(cursor_new_shape, int) or cursor_new_shape == self.edges[cursor_self]:
-                    # If the new shape is exactly the same as the current edge, we treat it as no change
-                    arrow.append(self.arrow[cursor_self])
-                    edges.append(self.edges[cursor_self])
-                    shape.append(self.tensor.shape[cursor_self])
-                    cursor_self += 1
-                    cursor_plan += 1
-                    continue
-                # Let's see if there are (0, 1) edges in the remaining self edges, if yes, we treat it as merging, otherwise splitting
-                cursor_self_finding = cursor_self
-                cursor_self_found = False
-                while True:
-                    if len(new_shape) == 0:
-                        cursor_self_found = True
-                        break
-                    cursor_self_finding += 1
-                    if cursor_self_finding == self.tensor.dim():
-                        break
-                    if self.edges[cursor_self_finding] == (1, 0):
-                        continue
-                    if self.edges[cursor_self_finding] == (0, 1):
-                        cursor_self_found = True
-                        break
-                    break
-                merging = cursor_self_found
-            if total > self.tensor.shape[cursor_self]:
-                merging = True
-            if total < self.tensor.shape[cursor_self]:
+            if self.tensor.dim() == 0:
                 merging = False
+            else:
+                if total == self.tensor.shape[cursor_self]:
+                    # We do not know whether it is merging or splitting, check more
+                    if (
+                        isinstance(cursor_new_shape, int)
+                        or cursor_new_shape == self.edges[cursor_self]
+                    ):
+                        # If the new shape is exactly the same as the current edge, we treat it as no change
+                        arrow.append(self.arrow[cursor_self])
+                        edges.append(self.edges[cursor_self])
+                        shape.append(self.tensor.shape[cursor_self])
+                        cursor_self += 1
+                        cursor_plan += 1
+                        continue
+                    # Let's see if there are (0, 1) edges in the remaining self edges, if yes, we treat it as merging, otherwise splitting
+                    cursor_self_finding = cursor_self
+                    cursor_self_found = False
+                    while True:
+                        if len(new_shape) == 0:
+                            cursor_self_found = True
+                            break
+                        cursor_self_finding += 1
+                        if cursor_self_finding == self.tensor.dim():
+                            break
+                        if self.edges[cursor_self_finding] == (1, 0):
+                            continue
+                        if self.edges[cursor_self_finding] == (0, 1):
+                            cursor_self_found = True
+                            break
+                        break
+                    merging = cursor_self_found
+                if total > self.tensor.shape[cursor_self]:
+                    merging = True
+                if total < self.tensor.shape[cursor_self]:
+                    merging = False
             if merging:
                 # Merging between [cursor_self, new_cursor_self) and the another side contains dimension as self_total
                 new_cursor_self = cursor_self
@@ -389,15 +386,23 @@ class GrassmannTensor:
                     plan_total *= new_cursor_new_shape[0] + new_cursor_new_shape[1]
                     new_cursor_plan += 1
                     # One dimension included, check if we can stop
-                    if plan_total == self.tensor.shape[cursor_self]:
-                        # new_shape block has been verified to be always tuple[int, int] before
+                    if self.tensor.dim() == 0:
                         even, odd, reorder, sign = self._reorder_indices(
-                            typing.cast(
-                                tuple[tuple[int, int], ...], new_shape[cursor_plan:new_cursor_plan]
-                            )
+                            typing.cast(tuple[tuple[int, int], ...], new_shape)
                         )
-                        if (even, odd) == self.edges[cursor_self]:
-                            break
+                        new_cursor_plan = len(new_shape)
+                        break
+                    else:
+                        if plan_total == self.tensor.shape[cursor_self]:
+                            # new_shape block has been verified to be always tuple[int, int] before
+                            even, odd, reorder, sign = self._reorder_indices(
+                                typing.cast(
+                                    tuple[tuple[int, int], ...],
+                                    new_shape[cursor_plan:new_cursor_plan],
+                                )
+                            )
+                            if (even, odd) == self.edges[cursor_self]:
+                                break
                     # For some reason we cannot stop here, continue to include more dimension, check something before continue
                     assert plan_total <= self.tensor.shape[cursor_self], (
                         f"Dimension mismatch in splitting with edges {self.edges} and new shape {new_shape}."
@@ -409,12 +414,16 @@ class GrassmannTensor:
                 for i in range(cursor_plan, new_cursor_plan):
                     # new_shape block has been verified to be always tuple[int, int] in the loop
                     new_cursor_new_shape = typing.cast(tuple[int, int], new_shape[i])
-                    arrow.append(self.arrow[cursor_self])
+                    if self.tensor.dim() == 0:
+                        arrow.append(False)
+                    else:
+                        arrow.append(self.arrow[cursor_self])
                     edges.append(new_cursor_new_shape)
                     shape.append(new_cursor_new_shape[0] + new_cursor_new_shape[1])
                 splitting_reorder.append((cursor_self, reorder))
                 splitting_sign.append((cursor_self, sign))
-                cursor_self += 1
+                if self.tensor.dim() != 0:
+                    cursor_self += 1
                 cursor_plan = new_cursor_plan
 
         tensor = self.tensor
@@ -429,7 +438,7 @@ class GrassmannTensor:
             (
                 self._unsqueeze(sign, index, self.tensor.dim())
                 for index, sign in splitting_sign
-                if self.arrow[index]
+                if self.tensor.dim() != 0 and self.arrow[index]
             ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )

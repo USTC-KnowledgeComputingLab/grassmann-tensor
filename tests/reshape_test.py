@@ -63,7 +63,7 @@ def test_reshape_trivial_edges(arrow: tuple[bool, ...], plan_range: tuple[int, i
     assert a.edges == c.edges
 
 
-def test_reshape_merging_dimension_mismatch_edges_because_of_nonequal() -> None:
+def test_reshape_merging_dimension_mismatch_edges_because_of_unequal() -> None:
     arrow = (True, True, True)
     edges = ((2, 2), (8, 8), (2, 2))
     a = GrassmannTensor(arrow, edges, torch.randn([4, 16, 4]))
