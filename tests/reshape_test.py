@@ -113,7 +113,7 @@ def test_reshape_splitting_shape_type() -> None:
         _ = a.reshape((2, (2, 2)))
 
 
-def test_reshape_splitting_dimension_mismatch_edges_because_of_nonequal() -> None:
+def test_reshape_splitting_dimension_mismatch_edges_because_of_unequal() -> None:
     arrow = (True,)
     edges = ((8, 8),)
     a = GrassmannTensor(arrow, edges, torch.randn([16]))
