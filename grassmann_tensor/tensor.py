@@ -510,9 +510,6 @@ class GrassmannTensor:
         if edge_first != edge_end:
             raise ValueError(f"Incompatible edges: {edge_first} and {edge_end}.")
 
-        if tensor.arrow[trace_pair[0]] != tensor.arrow[trace_pair[1]]:
-            tensor = tensor.reverse((trace_pair[1],))
-
         order = list(range(tensor.tensor.dim()))
         order_first = order.pop(trace_pair[0])
         order_end = order.pop(trace_pair[1])
