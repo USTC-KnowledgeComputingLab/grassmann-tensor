@@ -9,6 +9,7 @@ __all__ = ["GrassmannTensor"]
 import dataclasses
 import functools
 import typing
+import math
 import torch
 
 
@@ -487,6 +488,73 @@ class GrassmannTensor:
             _edges=tuple(edges),
             _tensor=tensor,
         )
+
+    def svd(
+        self,
+        free_names_u: tuple[int, ...],
+        *,
+        full_matrices: bool = False,  # When full_matrices=True, the gradient with respect to U and Vh will be ignored
+    ) -> tuple[GrassmannTensor, GrassmannTensor, GrassmannTensor]:
+        """
+        This function is used to computes the singular value decomposition of a grassmann tensor.
+        The SVD are implemented by follow steps:
+        1. Split the legs into left and right;
+        2. Merge the tensor with two groups.
+        3. Compute the singular value decomposition.
+        4. Split the legs into original left and right.
+        The returned tensors U and V are not unique, nor are they continuous with respect to self.
+        Due to this lack of uniqueness, different hardware and software may compute different singular vectors.
+        Gradients computed using U or Vh will only be finite when A does not have repeated singular values.
+        Furthermore, if the distance between any two singular values is close to zero, the gradient
+        will be numerically unstable, as it depends on the singular values
+        """
+        left_legs = tuple(int(i) for i in free_names_u)
+        right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
+        assert set(left_legs) | set(right_legs) == set(range(self.tensor.dim())), (
+            "Left/right must cover all tensor legs."
+        )
+
+        order = left_legs + right_legs
+        tensor = self.permute(order)
+
+        left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
+        right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
+
+        tensor = tensor.reshape((left_dim, right_dim))
+
+        U, S, Vh = torch.linalg.svd(tensor.tensor, full_matrices=full_matrices)
+
+        k = min(tensor.tensor.shape[0], tensor.tensor.shape[-1])
+        k_index = tensor.tensor.shape.index(k)
+
+        U = GrassmannTensor(
+            _arrow=(True, True), _edges=(tensor.edges[0], tensor.edges[k_index]), _tensor=U
+        )
+        S = GrassmannTensor(
+            _arrow=(
+                False,
+                True,
+            ),
+            _edges=(tensor.edges[k_index], tensor.edges[k_index]),
+            _tensor=torch.diag(S),
+        )
+        Vh = GrassmannTensor(
+            _arrow=(False, True), _edges=(tensor.edges[k_index], tensor.edges[-1]), _tensor=Vh
+        )
+        # Split
+        left_arrow = [self.arrow[i] for i in left_legs]
+        left_edges = [self.edges[i] for i in left_legs]
+
+        right_arrow = [self.arrow[i] for i in right_legs]
+        right_edges = [self.edges[i] for i in right_legs]
+
+        U = U.reshape(tuple(left_edges + [tensor.edges[k_index]]))
+        U._arrow = tuple(left_arrow + [True])
+
+        Vh = Vh.reshape(tuple([tensor.edges[k_index]] + right_edges))
+        Vh._arrow = tuple([False] + right_arrow)
+
+        return U, S, Vh
 
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (
