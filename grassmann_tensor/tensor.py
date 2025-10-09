@@ -9,6 +9,7 @@ __all__ = ["GrassmannTensor"]
 import dataclasses
 import functools
 import typing
+import math
 import torch
 
 
@@ -295,9 +296,28 @@ class GrassmannTensor:
             tensor = self.tensor.reshape(())
             return GrassmannTensor(_arrow=(), _edges=(), _tensor=tensor)
 
+        if new_shape == (1,) and int(self.tensor.numel()) == 1:
+            eo = self._calculate_even_odd()
+            new_shape = (eo,)
+
         cursor_plan: int = 0
         cursor_self: int = 0
         while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
+            if cursor_self == self.tensor.dim() and cursor_plan != len(new_shape):
+                new_shape_check = new_shape[cursor_plan]
+                if (isinstance(new_shape_check, int) and new_shape_check == 1) or (
+                    new_shape_check == (1, 0)
+                ):
+                    arrow.append(False)
+                    edges.append((1, 0))
+                    shape.append(1)
+                    cursor_plan += 1
+                    continue
+                raise AssertionError(
+                    "New shape exceeds after exhausting self dimensions: "
+                    f"edges={self.edges}, new_shape={new_shape}"
+                )
+
             if cursor_plan != len(new_shape) and new_shape[cursor_plan] == -1:
                 # Does not change
                 arrow.append(self.arrow[cursor_self])
@@ -306,7 +326,11 @@ class GrassmannTensor:
                 cursor_self += 1
                 cursor_plan += 1
                 continue
-            elif cursor_plan != len(new_shape) and new_shape[cursor_plan] == (1, 0):
+            elif (
+                cursor_plan != len(new_shape)
+                and new_shape[cursor_plan] == (1, 0)
+                and cursor_plan < len(new_shape) - 1
+            ):
                 # A trivial plan edge
                 arrow.append(False)
                 edges.append((1, 0))
@@ -531,6 +555,146 @@ class GrassmannTensor:
             _edges=tuple(edges),
             _tensor=tensor,
         )
+
+    def svd(
+        self,
+        free_names_u: tuple[int, ...],
+        *,
+        cutoff: int | None | tuple[int, int] = None,
+    ) -> tuple[GrassmannTensor, GrassmannTensor, GrassmannTensor]:
+        """
+        This function is used to computes the singular value decomposition of a grassmann tensor.
+        The SVD are implemented by follow steps:
+        1. Split the legs into left and right;
+        2. Merge the tensor with two groups.
+        3. Split the block tensor into two parts.
+        4. Compute the singular value decomposition.
+        5. Use cutoff to keep the largest cutoff singular values (globally across even/odd blocks).
+        6. Contract U, S and Vh.
+        7. Split the legs into original left and right.
+        The returned tensors U and V are not unique, nor are they continuous with respect to self.
+        Due to this lack of uniqueness, different hardware and software may compute different singular vectors.
+        Gradients computed using U or Vh will only be finite when A does not have repeated singular values.
+        Furthermore, if the distance between any two singular values is close to zero, the gradient
+        will be numerically unstable, as it depends on the singular values
+        """
+        left_legs = tuple(int(i) for i in free_names_u)
+        right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
+        assert set(left_legs) | set(right_legs) == set(range(self.tensor.dim())), (
+            "Left/right must cover all tensor legs."
+        )
+
+        if isinstance(cutoff, tuple):
+            assert len(cutoff) == 2, "The length of cutoff must be 2 if cutoff is a tuple."
+
+        order = left_legs + right_legs
+        tensor = self.permute(order)
+
+        left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
+        right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
+
+        tensor = tensor.reshape((left_dim, right_dim))
+
+        (even_left, odd_left) = tensor.edges[0]
+        (even_right, odd_right) = tensor.edges[1]
+        even_tensor = tensor.tensor[:even_left, :even_right]
+        odd_tensor = tensor.tensor[even_left:, even_right:]
+
+        if even_tensor.numel() > 0:
+            U_even, S_even, Vh_even = torch.linalg.svd(even_tensor, full_matrices=False)
+        else:
+            U_even = even_tensor.new_zeros((even_left, 0))
+            S_even = even_tensor.new_zeros((0,))
+            Vh_even = even_tensor.new_zeros((0, even_right))
+
+        if odd_tensor.numel() > 0:
+            U_odd, S_odd, Vh_odd = torch.linalg.svd(odd_tensor, full_matrices=False)
+        else:
+            U_odd = odd_tensor.new_zeros((odd_left, 0))
+            S_odd = odd_tensor.new_zeros((0,))
+            Vh_odd = odd_tensor.new_zeros((0, odd_right))
+
+        n_even, n_odd = S_even.shape[0], S_odd.shape[0]
+
+        if cutoff is None:
+            k_even, k_odd = n_even, n_odd
+        elif isinstance(cutoff, int):
+            if n_even == 0 and n_odd == 0:
+                raise RuntimeError("Both parity block are empty. Can not form SVD.")
+            assert cutoff > 0, f"Cutoff must be greater than 0, but got {cutoff}"
+            k_even = min(cutoff, n_even)
+            k_odd = min(cutoff, n_odd)
+        elif isinstance(cutoff, tuple):
+            assert len(cutoff) == 2, "The length of cutoff must be 2 if cutoff is a tuple."
+            if n_even == 0 and n_odd == 0:
+                raise RuntimeError("Both parity block are empty. Can not form SVD.")
+            k_even = max(0, min(int(cutoff[0]), n_even))
+            k_odd = max(0, min(int(cutoff[1]), n_odd))
+        else:
+            raise ValueError(
+                f"Cutoff must be an integer or a tuple of two integers, but got {cutoff}"
+            )
+
+        assert (k_even > 0 or n_even == 0) and (k_odd > 0 or n_odd == 0), (
+            "Per-block cutoff must be compatible with available singulars"
+        )
+
+        keep_even = torch.zeros(n_even, dtype=torch.bool, device=S_even.device)
+        keep_odd = torch.zeros(n_odd, dtype=torch.bool, device=S_odd.device)
+        if k_even > 0:
+            keep_even[:k_even] = True
+        if k_odd > 0:
+            keep_odd[:k_odd] = True
+
+        U_even_trunc = U_even[:, keep_even]
+        S_even_trunc = S_even[keep_even]
+        Vh_even_trunc = Vh_even[keep_even, :]
+
+        U_odd_trunc = U_odd[:, keep_odd]
+        S_odd_trunc = S_odd[keep_odd]
+        Vh_odd_trunc = Vh_odd[keep_odd, :]
+
+        U_tensor = torch.block_diag(U_even_trunc, U_odd_trunc)  # type: ignore[no-untyped-call]
+        S_tensor = torch.cat([S_even_trunc, S_odd_trunc], dim=0)
+        Vh_tensor = torch.block_diag(Vh_even_trunc, Vh_odd_trunc)  # type: ignore[no-untyped-call]
+
+        U_edges = (
+            (U_even_trunc.shape[0], U_odd_trunc.shape[0]),
+            (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
+        )
+        S_edges = (
+            (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
+            (Vh_even_trunc.shape[0], Vh_odd_trunc.shape[0]),
+        )
+        Vh_edges = (
+            (Vh_even_trunc.shape[0], Vh_odd_trunc.shape[0]),
+            (Vh_even_trunc.shape[1], Vh_odd_trunc.shape[1]),
+        )
+
+        U = GrassmannTensor(_arrow=(True, True), _edges=U_edges, _tensor=U_tensor)
+        S = GrassmannTensor(
+            _arrow=(
+                False,
+                True,
+            ),
+            _edges=S_edges,
+            _tensor=torch.diag(S_tensor),
+        )
+        Vh = GrassmannTensor(_arrow=(False, True), _edges=Vh_edges, _tensor=Vh_tensor)
+        # Split
+        left_arrow = [self.arrow[i] for i in left_legs]
+        left_edges = [self.edges[i] for i in left_legs]
+
+        right_arrow = [self.arrow[i] for i in right_legs]
+        right_edges = [self.edges[i] for i in right_legs]
+
+        U = U.reshape((*left_edges, U_edges[1]))
+        U._arrow = tuple(left_arrow + [True])
+
+        Vh = Vh.reshape((Vh_edges[0], *right_edges))
+        Vh._arrow = tuple([False] + right_arrow)
+
+        return U, S, Vh
 
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (

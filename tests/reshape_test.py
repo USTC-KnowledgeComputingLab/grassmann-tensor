@@ -197,3 +197,37 @@ def test_reshape_with_none_edge_assertion() -> None:
         _ = GrassmannTensor((), (), torch.tensor(2333)).reshape((1, -1))
     with pytest.raises(AssertionError, match="Ambiguous integer dim"):
         _ = GrassmannTensor((), (), torch.tensor(2333)).reshape((2, 2))
+
+
+@pytest.mark.parametrize(
+    "arrow, edges, tensor",
+    [
+        ((True, True), ((0, 1), (0, 1)), torch.tensor([[2333]])),
+        ((True, True, True), ((0, 1), (1, 0), (0, 1)), torch.tensor([[[2333]]])),
+    ],
+)
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1,),
+        (1, 1),
+        (1, 1, 1),
+        (1, 1, 1, 1),
+    ],
+)
+def test_reshape_with_one_dimension(
+    arrow: tuple[bool, ...],
+    edges: tuple[tuple[int, int], ...],
+    tensor: torch.Tensor,
+    shape: tuple[int, ...],
+) -> None:
+    a = GrassmannTensor(arrow, edges, tensor).reshape(shape)
+    assert (
+        len(a.arrow) == len(shape) and len(a.edges) == len(shape) and a.tensor.dim() == len(shape)
+    )
+
+
+def test_reshape_trailing_nontrivial_dim_raises() -> None:
+    a = GrassmannTensor((True,), ((2, 2),), torch.randn([4]))
+    with pytest.raises(AssertionError, match="New shape exceeds after exhausting self dimensions"):
+        _ = a.reshape((-1, (2, 2)))
