@@ -9,7 +9,7 @@ def test_svd() -> None:
         ((8, 8), (4, 4), (2, 2), (1, 1)),
         torch.randn([16, 8, 4, 2], dtype=torch.float64),
     )
-    U, S, Vh = gt.svd((0, 3))
+    U, S, Vh = gt.svd((0, 3), cutoff=1)
 
     # reshape U
     # left_arrow = U.arrow[:-1]
@@ -29,4 +29,6 @@ def test_svd() -> None:
     USV = USV.reshape(tuple(left_edge + right_edge))
     USV = USV.permute((0, 2, 3, 1))
 
-    assert torch.allclose(gt.tensor, USV.tensor)
+    # assert torch.allclose(gt.update_mask().tensor, USV.tensor)
+    rel_err = (gt.update_mask().tensor - USV.tensor).norm() / gt.update_mask().tensor.norm()
+    assert rel_err < 1e-2

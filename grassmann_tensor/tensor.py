@@ -494,14 +494,18 @@ class GrassmannTensor:
         free_names_u: tuple[int, ...],
         *,
         full_matrices: bool = False,  # When full_matrices=True, the gradient with respect to U and Vh will be ignored
+        cutoff: int | None = None,
     ) -> tuple[GrassmannTensor, GrassmannTensor, GrassmannTensor]:
         """
         This function is used to computes the singular value decomposition of a grassmann tensor.
         The SVD are implemented by follow steps:
         1. Split the legs into left and right;
         2. Merge the tensor with two groups.
-        3. Compute the singular value decomposition.
-        4. Split the legs into original left and right.
+        3. Split the block tensor into two parts.
+        4. Compute the singular value decomposition.
+        5. Use the cutoff to cut off the lower singular values and corresponding U and V.
+        6. Contract U, S and Vh.
+        7. Split the legs into original left and right.
         The returned tensors U and V are not unique, nor are they continuous with respect to self.
         Due to this lack of uniqueness, different hardware and software may compute different singular vectors.
         Gradients computed using U or Vh will only be finite when A does not have repeated singular values.
@@ -522,25 +526,75 @@ class GrassmannTensor:
 
         tensor = tensor.reshape((left_dim, right_dim))
 
-        U, S, Vh = torch.linalg.svd(tensor.tensor, full_matrices=full_matrices)
+        tensor.update_mask()
 
-        k = min(tensor.tensor.shape[0], tensor.tensor.shape[-1])
-        k_index = tensor.tensor.shape.index(k)
+        even_tensor = tensor.tensor[: tensor.edges[0][0], : tensor.edges[1][0]]
+        odd_tensor = tensor.tensor[tensor.edges[0][1] :, tensor.edges[1][1] :]
 
-        U = GrassmannTensor(
-            _arrow=(True, True), _edges=(tensor.edges[0], tensor.edges[k_index]), _tensor=U
+        U_even, S_even, Vh_even = torch.linalg.svd(even_tensor, full_matrices=full_matrices)
+        U_odd, S_odd, Vh_odd = torch.linalg.svd(odd_tensor, full_matrices=full_matrices)
+
+        if cutoff is None:
+            cutoff = 0
+        total = S_even.numel() + S_odd.numel()
+        cutoff = max(0, min(cutoff, total))
+
+        if cutoff == 0:
+            keep_even = torch.ones_like(S_even, dtype=torch.bool)
+            keep_odd = torch.ones_like(S_odd, dtype=torch.bool)
+        else:
+            S_cat = torch.cat([S_even, S_odd])
+            sorted_vals, sorted_indices = S_cat.sort()
+            cutoff_indices = sorted_indices[:cutoff]
+
+            mask_even_indices = cutoff_indices < S_even.shape[0]
+            mask_odd_indices = ~mask_even_indices
+            even_cutoff_indices = cutoff_indices[mask_even_indices]
+            odd_cutoff_indices = cutoff_indices[mask_odd_indices] - S_even.shape[0]
+
+            keep_even = torch.ones_like(S_even, dtype=torch.bool)
+            if even_cutoff_indices.numel() > 0:
+                keep_even[even_cutoff_indices] = False
+
+            keep_odd = torch.ones_like(S_odd, dtype=torch.bool)
+            if odd_cutoff_indices.numel() > 0:
+                keep_odd[odd_cutoff_indices] = False
+
+        U_even_trunc = U_even[:, keep_even]
+        S_even_trunc = S_even[keep_even]
+        Vh_even_trunc = Vh_even[keep_even, :]
+
+        U_odd_trunc = U_odd[:, keep_odd]
+        S_odd_trunc = S_odd[keep_odd]
+        Vh_odd_trunc = Vh_odd[keep_odd, :]
+
+        U_tensor = torch.block_diag(U_even_trunc, U_odd_trunc)  # type: ignore[no-untyped-call]
+        S_tensor = torch.cat([S_even_trunc, S_odd_trunc], dim=0)
+        Vh_tensor = torch.block_diag(Vh_even_trunc, Vh_odd_trunc)  # type: ignore[no-untyped-call]
+
+        U_edges = (
+            (U_even_trunc.shape[0], U_odd_trunc.shape[0]),
+            (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
         )
+        S_edges = (
+            (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
+            (Vh_even_trunc.shape[0], Vh_odd_trunc.shape[0]),
+        )
+        Vh_edges = (
+            (Vh_even_trunc.shape[0], Vh_odd_trunc.shape[0]),
+            (Vh_even_trunc.shape[1], Vh_odd_trunc.shape[1]),
+        )
+
+        U = GrassmannTensor(_arrow=(True, True), _edges=U_edges, _tensor=U_tensor)
         S = GrassmannTensor(
             _arrow=(
                 False,
                 True,
             ),
-            _edges=(tensor.edges[k_index], tensor.edges[k_index]),
-            _tensor=torch.diag(S),
+            _edges=S_edges,
+            _tensor=torch.diag(S_tensor),
         )
-        Vh = GrassmannTensor(
-            _arrow=(False, True), _edges=(tensor.edges[k_index], tensor.edges[-1]), _tensor=Vh
-        )
+        Vh = GrassmannTensor(_arrow=(False, True), _edges=Vh_edges, _tensor=Vh_tensor)
         # Split
         left_arrow = [self.arrow[i] for i in left_legs]
         left_edges = [self.edges[i] for i in left_legs]
@@ -548,10 +602,10 @@ class GrassmannTensor:
         right_arrow = [self.arrow[i] for i in right_legs]
         right_edges = [self.edges[i] for i in right_legs]
 
-        U = U.reshape(tuple(left_edges + [tensor.edges[k_index]]))
+        U = U.reshape((*left_edges, U_edges[1]))
         U._arrow = tuple(left_arrow + [True])
 
-        Vh = Vh.reshape(tuple([tensor.edges[k_index]] + right_edges))
+        Vh = Vh.reshape((Vh_edges[0], *right_edges))
         Vh._arrow = tuple([False] + right_arrow)
 
         return U, S, Vh
