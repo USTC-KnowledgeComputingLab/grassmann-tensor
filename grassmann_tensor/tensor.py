@@ -503,7 +503,7 @@ class GrassmannTensor:
         2. Merge the tensor with two groups.
         3. Split the block tensor into two parts.
         4. Compute the singular value decomposition.
-        5. Use the cutoff to cut off the lower singular values and corresponding U and V.
+        5. Use cutoff to keep the largest cutoff singular values (globally across even/odd blocks).
         6. Contract U, S and Vh.
         7. Split the legs into original left and right.
         The returned tensors U and V are not unique, nor are they continuous with respect to self.
@@ -534,31 +534,34 @@ class GrassmannTensor:
         U_even, S_even, Vh_even = torch.linalg.svd(even_tensor, full_matrices=full_matrices)
         U_odd, S_odd, Vh_odd = torch.linalg.svd(odd_tensor, full_matrices=full_matrices)
 
-        if cutoff is None:
-            cutoff = 0
         total = S_even.numel() + S_odd.numel()
-        cutoff = max(0, min(cutoff, total))
 
-        if cutoff == 0:
-            keep_even = torch.ones_like(S_even, dtype=torch.bool)
-            keep_odd = torch.ones_like(S_odd, dtype=torch.bool)
+        if cutoff is None:
+            cutoff = total
+        else:
+            cutoff = min(int(cutoff), total)
+
+        assert cutoff > 0, f"Cutoff must be greater than 0, but got {cutoff}"
+
+        if cutoff == total:
+            keep_even = torch.ones_like(S_even, dtype=torch.bool, device=S_even.device)
+            keep_odd = torch.ones_like(S_odd, dtype=torch.bool, device=S_odd.device)
         else:
             S_cat = torch.cat([S_even, S_odd])
-            sorted_vals, sorted_indices = S_cat.sort()
-            cutoff_indices = sorted_indices[:cutoff]
+            top_vals, top_indices = torch.topk(S_cat, k=cutoff, largest=True, sorted=False)
 
-            mask_even_indices = cutoff_indices < S_even.shape[0]
-            mask_odd_indices = ~mask_even_indices
-            even_cutoff_indices = cutoff_indices[mask_even_indices]
-            odd_cutoff_indices = cutoff_indices[mask_odd_indices] - S_even.shape[0]
+            even_mask = top_indices < S_even.shape[0]
+            odd_mask = ~even_mask
+            even_keep_indices = top_indices[even_mask]
+            odd_keep_indices = top_indices[odd_mask] - S_even.shape[0]
 
-            keep_even = torch.ones_like(S_even, dtype=torch.bool)
-            if even_cutoff_indices.numel() > 0:
-                keep_even[even_cutoff_indices] = False
+            keep_even = torch.zeros_like(S_even, dtype=torch.bool).to(S_even.device)
+            if even_keep_indices.numel() > 0:
+                keep_even[even_keep_indices] = True
 
-            keep_odd = torch.ones_like(S_odd, dtype=torch.bool)
-            if odd_cutoff_indices.numel() > 0:
-                keep_odd[odd_cutoff_indices] = False
+            keep_odd = torch.ones_like(S_odd, dtype=torch.bool).to(S_odd.device)
+            if odd_keep_indices.numel() > 0:
+                keep_odd[odd_keep_indices] = True
 
         U_even_trunc = U_even[:, keep_even]
         S_even_trunc = S_even[keep_even]
