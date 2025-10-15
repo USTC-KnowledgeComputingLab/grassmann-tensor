@@ -556,12 +556,10 @@ class GrassmannTensor:
             odd_keep_indices = top_indices[odd_mask] - S_even.shape[0]
 
             keep_even = torch.zeros_like(S_even, dtype=torch.bool).to(S_even.device)
-            if even_keep_indices.numel() > 0:
-                keep_even[even_keep_indices] = True
+            keep_even[even_keep_indices] = True
 
             keep_odd = torch.ones_like(S_odd, dtype=torch.bool).to(S_odd.device)
-            if odd_keep_indices.numel() > 0:
-                keep_odd[odd_keep_indices] = True
+            keep_odd[odd_keep_indices] = True
 
         U_even_trunc = U_even[:, keep_even]
         S_even_trunc = S_even[keep_even]

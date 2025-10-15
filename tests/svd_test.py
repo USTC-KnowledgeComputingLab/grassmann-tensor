@@ -1,5 +1,6 @@
 import torch
 import pytest
+from _pytest.mark.structures import ParameterSet
 import math
 import itertools
 from typing import TypeAlias, Iterable
@@ -13,7 +14,8 @@ Cutoff: TypeAlias = int
 Tau: TypeAlias = float
 FreeNamesU: TypeAlias = tuple[int, ...]
 
-SVDCases = Iterable[tuple[Arrow, Edges, Tensor, Cutoff, Tau, FreeNamesU]]
+SVDCases = Iterable[ParameterSet]
+
 
 def get_total_singular(edges: Edges, free_names_u: FreeNamesU) -> int:
     even, odd = edges[free_names_u[0]]
@@ -31,20 +33,30 @@ def get_total_singular(edges: Edges, free_names_u: FreeNamesU) -> int:
     total_singular += min(even, odd)
     return total_singular
 
+
 def tau_for_cutoff(c: int, total: int, alpha: float = 0.8) -> float:
     lo, hi = 1e-8, 1e-1
     x = (total - c) / max(1, total - 1)
-    return lo + (hi - lo) * (x ** alpha)
+    return lo + (hi - lo) * (x**alpha)
+
 
 def choose_free_names(n_edges: int, limit: int = 8) -> list[FreeNamesU]:
-    combos = [tuple(c) for r in range(1, n_edges) for c in itertools.combinations(range(n_edges), r)]
+    combos = [
+        tuple(c) for r in range(1, n_edges) for c in itertools.combinations(range(n_edges), r)
+    ]
     return combos[:limit]
+
 
 BASE_GT_CASES: list[tuple[Arrow, Edges, Tensor]] = [
     ((True, True), ((2, 2), (4, 4)), torch.randn(4, 8, dtype=torch.float64)),
     ((True, True, True), ((2, 2), (4, 4), (8, 8)), torch.randn(4, 8, 16, dtype=torch.float64)),
-    ((True, True, True, True), ((2, 2), (4, 4), (8, 8), (16, 16)), torch.randn(4, 8, 16, 32, dtype=torch.float64)),
+    (
+        (True, True, True, True),
+        ((2, 2), (4, 4), (8, 8), (16, 16)),
+        torch.randn(4, 8, 16, 32, dtype=torch.float64),
+    ),
 ]
+
 
 def svd_cases() -> SVDCases:
     params = []
@@ -57,11 +69,17 @@ def svd_cases() -> SVDCases:
                 tau = tau_for_cutoff(cutoff or total, total)
                 params.append(
                     pytest.param(
-                        arrow, edges, tensor, cutoff, tau, fnu,
-                        id=f"edges={tuple(edges)}|fnu={fnu}|cut={cutoff}|tau={tau:.2e}"
+                        arrow,
+                        edges,
+                        tensor,
+                        cutoff,
+                        tau,
+                        fnu,
+                        id=f"edges={tuple(edges)}|fnu={fnu}|cut={cutoff}|tau={tau:.2e}",
                     )
                 )
     return params
+
 
 @pytest.mark.parametrize(
     "arrow, edges, tensor, cutoff, tau, free_names_u",
@@ -69,12 +87,12 @@ def svd_cases() -> SVDCases:
 )
 @pytest.mark.repeat(20)
 def test_svd(
-        arrow: Arrow,
-        edges: Edges,
-        tensor: Tensor,
-        cutoff: Cutoff,
-        tau: Tau,
-        free_names_u: FreeNamesU,
+    arrow: Arrow,
+    edges: Edges,
+    tensor: Tensor,
+    cutoff: Cutoff,
+    tau: Tau,
+    free_names_u: FreeNamesU,
 ) -> None:
     gt = GrassmannTensor(arrow, edges, tensor)
     U, S, Vh = gt.svd(free_names_u, cutoff=cutoff)
@@ -107,20 +125,19 @@ def test_svd(
     rel_err = (masked - USV.tensor).norm() / max(den, eps)
     assert rel_err <= tau
 
+
 @pytest.mark.parametrize(
     "arrow, edges, tensor, cutoff, tau, free_names_u",
     svd_cases(),
 )
 def test_svd_with_zero_cutoff(
-        arrow: Arrow,
-        edges: Edges,
-        tensor: Tensor,
-        cutoff: Cutoff,
-        tau: Tau,
-        free_names_u: FreeNamesU,
+    arrow: Arrow,
+    edges: Edges,
+    tensor: Tensor,
+    cutoff: Cutoff,
+    tau: Tau,
+    free_names_u: FreeNamesU,
 ) -> None:
     gt = GrassmannTensor(arrow, edges, tensor)
     with pytest.raises(AssertionError, match="Cutoff must be greater than 0"):
         _, _, _ = gt.svd(free_names_u, cutoff=0)
-
-
