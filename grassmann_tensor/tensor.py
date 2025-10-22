@@ -756,6 +756,19 @@ class GrassmannTensor:
             return self
         return NotImplemented
 
+    def __matmul__(self, other: typing.Any) -> GrassmannTensor:
+        if isinstance(other, GrassmannTensor):
+            return self.matmul(other)
+        return NotImplemented
+
+    def __rmatmul__(self, other: typing.Any) -> GrassmannTensor:
+        return NotImplemented
+
+    def __imatmul__(self, other: typing.Any) -> GrassmannTensor:
+        if isinstance(other, GrassmannTensor):
+            return self.matmul(other)
+        return NotImplemented
+
     def clone(self) -> GrassmannTensor:
         """
         Create a deep copy of the Grassmann tensor.
