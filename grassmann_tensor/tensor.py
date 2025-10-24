@@ -9,6 +9,7 @@ __all__ = ["GrassmannTensor"]
 import dataclasses
 import functools
 import typing
+import math
 import torch
 
 
@@ -531,6 +532,128 @@ class GrassmannTensor:
             _edges=tuple(edges),
             _tensor=tensor,
         )
+
+    def svd(
+        self,
+        free_names_u: tuple[int, ...],
+        *,
+        full_matrices: bool = False,  # When full_matrices=True, the gradient with respect to U and Vh will be ignored
+        cutoff: int | None = None,
+    ) -> tuple[GrassmannTensor, GrassmannTensor, GrassmannTensor]:
+        """
+        This function is used to computes the singular value decomposition of a grassmann tensor.
+        The SVD are implemented by follow steps:
+        1. Split the legs into left and right;
+        2. Merge the tensor with two groups.
+        3. Split the block tensor into two parts.
+        4. Compute the singular value decomposition.
+        5. Use cutoff to keep the largest cutoff singular values (globally across even/odd blocks).
+        6. Contract U, S and Vh.
+        7. Split the legs into original left and right.
+        The returned tensors U and V are not unique, nor are they continuous with respect to self.
+        Due to this lack of uniqueness, different hardware and software may compute different singular vectors.
+        Gradients computed using U or Vh will only be finite when A does not have repeated singular values.
+        Furthermore, if the distance between any two singular values is close to zero, the gradient
+        will be numerically unstable, as it depends on the singular values
+        """
+        left_legs = tuple(int(i) for i in free_names_u)
+        right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
+        assert set(left_legs) | set(right_legs) == set(range(self.tensor.dim())), (
+            "Left/right must cover all tensor legs."
+        )
+
+        order = left_legs + right_legs
+        tensor = self.permute(order)
+
+        left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
+        right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
+
+        tensor = tensor.reshape((left_dim, right_dim))
+
+        tensor.update_mask()
+
+        even_tensor = tensor.tensor[: tensor.edges[0][0], : tensor.edges[1][0]]
+        odd_tensor = tensor.tensor[tensor.edges[0][1] :, tensor.edges[1][1] :]
+
+        U_even, S_even, Vh_even = torch.linalg.svd(even_tensor, full_matrices=full_matrices)
+        U_odd, S_odd, Vh_odd = torch.linalg.svd(odd_tensor, full_matrices=full_matrices)
+
+        total = S_even.numel() + S_odd.numel()
+
+        if cutoff is None:
+            cutoff = total
+        else:
+            cutoff = min(int(cutoff), total)
+
+        assert cutoff > 0, f"Cutoff must be greater than 0, but got {cutoff}"
+
+        if cutoff == total:
+            keep_even = torch.ones_like(S_even, dtype=torch.bool, device=S_even.device)
+            keep_odd = torch.ones_like(S_odd, dtype=torch.bool, device=S_odd.device)
+        else:
+            S_cat = torch.cat([S_even, S_odd])
+            top_vals, top_indices = torch.topk(S_cat, k=cutoff, largest=True, sorted=False)
+
+            even_mask = top_indices < S_even.shape[0]
+            odd_mask = ~even_mask
+            even_keep_indices = top_indices[even_mask]
+            odd_keep_indices = top_indices[odd_mask] - S_even.shape[0]
+
+            keep_even = torch.zeros_like(S_even, dtype=torch.bool).to(S_even.device)
+            keep_even[even_keep_indices] = True
+
+            keep_odd = torch.ones_like(S_odd, dtype=torch.bool).to(S_odd.device)
+            keep_odd[odd_keep_indices] = True
+
+        U_even_trunc = U_even[:, keep_even]
+        S_even_trunc = S_even[keep_even]
+        Vh_even_trunc = Vh_even[keep_even, :]
+
+        U_odd_trunc = U_odd[:, keep_odd]
+        S_odd_trunc = S_odd[keep_odd]
+        Vh_odd_trunc = Vh_odd[keep_odd, :]
+
+        U_tensor = torch.block_diag(U_even_trunc, U_odd_trunc)  # type: ignore[no-untyped-call]
+        S_tensor = torch.cat([S_even_trunc, S_odd_trunc], dim=0)
+        Vh_tensor = torch.block_diag(Vh_even_trunc, Vh_odd_trunc)  # type: ignore[no-untyped-call]
+
+        U_edges = (
+            (U_even_trunc.shape[0], U_odd_trunc.shape[0]),
+            (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
+        )
+        S_edges = (
+            (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
+            (Vh_even_trunc.shape[0], Vh_odd_trunc.shape[0]),
+        )
+        Vh_edges = (
+            (Vh_even_trunc.shape[0], Vh_odd_trunc.shape[0]),
+            (Vh_even_trunc.shape[1], Vh_odd_trunc.shape[1]),
+        )
+
+        U = GrassmannTensor(_arrow=(True, True), _edges=U_edges, _tensor=U_tensor)
+        S = GrassmannTensor(
+            _arrow=(
+                False,
+                True,
+            ),
+            _edges=S_edges,
+            _tensor=torch.diag(S_tensor),
+        )
+        Vh = GrassmannTensor(_arrow=(False, True), _edges=Vh_edges, _tensor=Vh_tensor)
+        # Split
+        left_arrow = [self.arrow[i] for i in left_legs]
+        left_edges = [self.edges[i] for i in left_legs]
+
+        right_arrow = [self.arrow[i] for i in right_legs]
+        right_edges = [self.edges[i] for i in right_legs]
+
+        U = U.reshape((*left_edges, U_edges[1]))
+        U._arrow = tuple(left_arrow + [True])
+
+        Vh = Vh.reshape((Vh_edges[0], *right_edges))
+        Vh._arrow = tuple([False] + right_arrow)
+
+        return U, S, Vh
 
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (
