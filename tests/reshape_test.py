@@ -180,5 +180,20 @@ def test_reshape_equal_edges_nontrivial_merging_with_other_edge() -> None:
 def test_reshape_with_none() -> None:
     a = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
     assert len(a.arrow) == 0 and len(a.edges) == 0 and a.tensor.dim() == 0
-    b = GrassmannTensor((), (), torch.tensor(2333)).reshape(((0, 1), (0, 1))).reshape(())
+    b = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
     assert len(b.arrow) == 0 and len(b.edges) == 0 and b.tensor.dim() == 0
+    c = GrassmannTensor((), (), torch.tensor(2333)).reshape((1, 1))
+    assert len(c.arrow) == 2 and len(c.edges) == 2 and c.tensor.dim() == 2
+
+
+def test_reshape_with_none_edge_assertion() -> None:
+    with pytest.raises(AssertionError, match="Only pure even edges can be merged into none edges"):
+        _ = GrassmannTensor((True, True), ((0, 1), (1, 0)), torch.tensor([[2333]])).reshape(())
+    with pytest.raises(AssertionError, match="Cannot split none edges into illegal edges"):
+        _ = GrassmannTensor((), (), torch.tensor(2333)).reshape(((0, 1),))
+    with pytest.raises(AssertionError, match="Cannot split none edges into illegal edges"):
+        _ = GrassmannTensor((), (), torch.tensor(2333)).reshape(((0, 1), (1, 0)))
+    with pytest.raises(AssertionError, match="Cannot use -1 when reshaping from a scalar"):
+        _ = GrassmannTensor((), (), torch.tensor(2333)).reshape((1, -1))
+    with pytest.raises(AssertionError, match="Ambiguous integer dim"):
+        _ = GrassmannTensor((), (), torch.tensor(2333)).reshape((2, 2))
