@@ -295,9 +295,28 @@ class GrassmannTensor:
             tensor = self.tensor.reshape(())
             return GrassmannTensor(_arrow=(), _edges=(), _tensor=tensor)
 
+        if new_shape == (1,) and int(self.tensor.numel()) == 1:
+            eo = self._calculate_even_odd()
+            new_shape = (eo,)
+
         cursor_plan: int = 0
         cursor_self: int = 0
         while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
+            if cursor_self == self.tensor.dim() and cursor_plan != len(new_shape):
+                new_shape_check = new_shape[cursor_plan]
+                if (isinstance(new_shape_check, int) and new_shape_check == 1) or (
+                    new_shape_check == (1, 0)
+                ):
+                    arrow.append(False)
+                    edges.append((1, 0))
+                    shape.append(1)
+                    cursor_plan += 1
+                    continue
+                raise AssertionError(
+                    "New shape exceeds after exhausting self dimensions: "
+                    f"edges={self.edges}, new_shape={new_shape}"
+                )
+
             if cursor_plan != len(new_shape) and new_shape[cursor_plan] == -1:
                 # Does not change
                 arrow.append(self.arrow[cursor_self])
@@ -306,7 +325,11 @@ class GrassmannTensor:
                 cursor_self += 1
                 cursor_plan += 1
                 continue
-            elif cursor_plan != len(new_shape) and new_shape[cursor_plan] == (1, 0):
+            elif (
+                cursor_plan != len(new_shape)
+                and new_shape[cursor_plan] == (1, 0)
+                and cursor_plan < len(new_shape) - 1
+            ):
                 # A trivial plan edge
                 arrow.append(False)
                 edges.append((1, 0))
