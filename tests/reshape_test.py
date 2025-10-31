@@ -231,3 +231,35 @@ def test_reshape_trailing_nontrivial_dim_raises() -> None:
     a = GrassmannTensor((True,), ((2, 2),), torch.randn([4]))
     with pytest.raises(AssertionError, match="New shape exceeds after exhausting self dimensions"):
         _ = a.reshape((-1, (2, 2)))
+
+
+@pytest.mark.parametrize(
+    "tensor",
+    [
+        GrassmannTensor(
+            (True, True, True, True),
+            ((1, 0), (1, 0), (2, 2), (8, 8)),
+            torch.randn(1, 1, 4, 16),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 64),
+        ((1, 0), 64),
+        (-1, 64),
+    ],
+)
+def test_reshape_trivial_head_equivalence(
+    tensor: GrassmannTensor,
+    shape: tuple[int, ...],
+) -> None:
+    baseline_tensor = tensor.reshape((1, 64))
+    actual_tensor = tensor.reshape(shape)
+
+    assert actual_tensor.edges == ((1, 0), (32, 32))
+    assert torch.allclose(actual_tensor.tensor, baseline_tensor.tensor)
+
+    roundtrip_tensor = actual_tensor.reshape(tensor.edges)
+    assert torch.allclose(roundtrip_tensor.tensor, tensor.tensor)
