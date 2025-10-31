@@ -263,3 +263,27 @@ def test_reshape_trivial_head_equivalence(
 
     roundtrip_tensor = actual_tensor.reshape(tensor.edges)
     assert torch.allclose(roundtrip_tensor.tensor, tensor.tensor)
+
+
+def test_reshape_head_1_inserts_trivial_when_self_dim_not_one() -> None:
+    a = GrassmannTensor(
+        (True, True),
+        ((2, 2), (8, 8)),
+        torch.randn(4, 16),
+    )
+    out = a.reshape((1, 64))
+    assert out.edges == ((1, 0), (32, 32))
+    assert out.tensor.shape == (1, 64)
+    assert out.arrow[0] is False
+
+
+def test_reshape_plan_exhausted_then_skip_trivial_self_edges() -> None:
+    a = GrassmannTensor(
+        (False, False, False),
+        ((2, 2), (1, 0), (1, 0)),
+        torch.randn(4, 1, 1),
+    )
+    out = a.reshape((4,))
+    assert out.edges == ((2, 2),)
+    assert out.tensor.shape == (4,)
+    assert out.arrow == (False,)
