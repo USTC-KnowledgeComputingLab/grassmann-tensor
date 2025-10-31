@@ -569,6 +569,27 @@ class GrassmannTensor:
             _tensor=tensor,
         )
 
+    def _group_edges(
+        self,
+        left_legs: typing.Iterable[int],
+    ) -> tuple[GrassmannTensor, tuple[int, ...], tuple[int, ...]]:
+        left_legs = tuple(int(i) for i in left_legs)
+        right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
+        assert set(left_legs) | set(right_legs) == set(range(self.tensor.dim())), (
+            "Left/right must cover all tensor legs."
+        )
+
+        order = left_legs + right_legs
+
+        tensor = self.permute(order)
+
+        left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
+        right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
+
+        tensor = tensor.reshape((left_dim, right_dim))
+
+        return tensor, left_legs, right_legs
+
     def svd(
         self,
         free_names_u: tuple[int, ...],
@@ -591,22 +612,10 @@ class GrassmannTensor:
         Furthermore, if the distance between any two singular values is close to zero, the gradient
         will be numerically unstable, as it depends on the singular values
         """
-        left_legs = tuple(int(i) for i in free_names_u)
-        right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
-        assert set(left_legs) | set(right_legs) == set(range(self.tensor.dim())), (
-            "Left/right must cover all tensor legs."
-        )
-
         if isinstance(cutoff, tuple):
             assert len(cutoff) == 2, "The length of cutoff must be 2 if cutoff is a tuple."
 
-        order = left_legs + right_legs
-        tensor = self.permute(order)
-
-        left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
-        right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
-
-        tensor = tensor.reshape((left_dim, right_dim))
+        tensor, left_legs, right_legs = self._group_edges(free_names_u)
 
         (even_left, odd_left) = tensor.edges[0]
         (even_right, odd_right) = tensor.edges[1]
@@ -708,6 +717,51 @@ class GrassmannTensor:
         Vh._arrow = tuple([False] + right_arrow)
 
         return U, S, Vh
+
+    def _get_inv_order(self, order: tuple[int, ...]) -> tuple[int, ...]:
+        inv = [0] * self.tensor.dim()
+        for new_position, origin_idx in enumerate(order):
+            inv[origin_idx] = new_position
+        return tuple(inv)
+
+    def exponential(self, pairs: tuple[int, ...]) -> GrassmannTensor:
+        tensor, left_legs, right_legs = self._group_edges(pairs)
+
+        edges_to_reverse = [i for i in range(2) if tensor.arrow[i]]
+        if edges_to_reverse:
+            tensor = tensor.reverse(tuple(edges_to_reverse))
+
+        left_dim, right_dim = tensor.tensor.shape
+
+        assert left_dim == right_dim, (
+            f"Exponential requires a square operator, but got {left_dim} x {right_dim}."
+        )
+
+        (even_left, odd_left) = tensor.edges[0]
+        (even_right, odd_right) = tensor.edges[1]
+
+        even_tensor = tensor.tensor[:even_left, :even_right]
+        odd_tensor = tensor.tensor[even_left:, even_right:]
+
+        even_tensor_exp = torch.linalg.matrix_exp(even_tensor)
+        odd_tensor_exp = torch.linalg.matrix_exp(odd_tensor)
+
+        tensor_exp = torch.block_diag(even_tensor_exp, odd_tensor_exp)  # type: ignore[no-untyped-call]
+
+        tensor_exp = dataclasses.replace(tensor, _tensor=tensor_exp)
+
+        if edges_to_reverse:
+            tensor_exp = tensor_exp.reverse(tuple(edges_to_reverse))
+
+        order = left_legs + right_legs
+        edges_after_permute = tuple(self.edges[i] for i in order)
+        tensor_exp = tensor_exp.reshape(edges_after_permute)
+
+        inv_order = self._get_inv_order(order)
+
+        tensor_exp = tensor_exp.permute(inv_order)
+
+        return tensor_exp
 
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (
