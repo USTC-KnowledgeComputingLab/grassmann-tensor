@@ -231,3 +231,59 @@ def test_reshape_trailing_nontrivial_dim_raises() -> None:
     a = GrassmannTensor((True,), ((2, 2),), torch.randn([4]))
     with pytest.raises(AssertionError, match="New shape exceeds after exhausting self dimensions"):
         _ = a.reshape((-1, (2, 2)))
+
+
+@pytest.mark.parametrize(
+    "tensor",
+    [
+        GrassmannTensor(
+            (True, True, True, True),
+            ((1, 0), (1, 0), (2, 2), (8, 8)),
+            torch.randn(1, 1, 4, 16),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 64),
+        ((1, 0), 64),
+        (-1, 64),
+    ],
+)
+def test_reshape_trivial_head_equivalence(
+    tensor: GrassmannTensor,
+    shape: tuple[int, ...],
+) -> None:
+    baseline_tensor = tensor.reshape((1, 64))
+    actual_tensor = tensor.reshape(shape)
+
+    assert actual_tensor.edges == ((1, 0), (32, 32))
+    assert torch.allclose(actual_tensor.tensor, baseline_tensor.tensor)
+
+    roundtrip_tensor = actual_tensor.reshape(tensor.edges)
+    assert torch.allclose(roundtrip_tensor.tensor, tensor.tensor)
+
+
+def test_reshape_head_1_inserts_trivial_when_self_dim_not_one() -> None:
+    a = GrassmannTensor(
+        (True, True),
+        ((2, 2), (8, 8)),
+        torch.randn(4, 16),
+    )
+    out = a.reshape((1, 64))
+    assert out.edges == ((1, 0), (32, 32))
+    assert out.tensor.shape == (1, 64)
+    assert out.arrow[0] is False
+
+
+def test_reshape_plan_exhausted_then_skip_trivial_self_edges() -> None:
+    a = GrassmannTensor(
+        (False, False, False),
+        ((2, 2), (1, 0), (1, 0)),
+        torch.randn(4, 1, 1),
+    )
+    out = a.reshape((4,))
+    assert out.edges == ((2, 2),)
+    assert out.tensor.shape == (4,)
+    assert out.arrow == (False,)

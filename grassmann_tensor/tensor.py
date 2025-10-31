@@ -297,8 +297,8 @@ class GrassmannTensor:
             return GrassmannTensor(_arrow=(), _edges=(), _tensor=tensor)
 
         if new_shape == (1,) and int(self.tensor.numel()) == 1:
-            eo = self._calculate_even_odd()
-            new_shape = (eo,)
+            even_self, odd_self = self._calculate_even_odd()
+            new_shape = ((even_self, odd_self),)
 
         cursor_plan: int = 0
         cursor_self: int = 0
@@ -317,6 +317,19 @@ class GrassmannTensor:
                     "New shape exceeds after exhausting self dimensions: "
                     f"edges={self.edges}, new_shape={new_shape}"
                 )
+
+            if cursor_plan != len(new_shape):
+                new_shape_check = new_shape[cursor_plan]
+                if (
+                    isinstance(new_shape_check, int)
+                    and new_shape_check == 1
+                    and self.tensor.shape[cursor_self] != 1
+                ):
+                    arrow.append(False)
+                    edges.append((1, 0))
+                    shape.append(1)
+                    cursor_plan += 1
+                    continue
 
             if cursor_plan != len(new_shape) and new_shape[cursor_plan] == -1:
                 # Does not change
