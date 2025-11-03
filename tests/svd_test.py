@@ -1,7 +1,6 @@
 import torch
 import pytest
 from _pytest.mark.structures import ParameterSet
-import math
 import itertools
 from typing import TypeAlias, Iterable, Any
 
@@ -43,6 +42,7 @@ def choose_free_names(n_edges: int, limit: int = 8) -> list[FreeNamesU]:
 
 BASE_GT_CASES: list[tuple[Arrow, Edges, Tensor]] = [
     ((True, True), ((2, 2), (4, 4)), torch.randn(4, 8, dtype=torch.float64)),
+    ((False, False), ((2, 2), (4, 4)), torch.randn(4, 8, dtype=torch.float64)),
     ((True, True, True), ((2, 2), (4, 4), (8, 8)), torch.randn(4, 8, 16, dtype=torch.float64)),
     (
         (True, True, True, True),
@@ -106,27 +106,13 @@ def test_svd(
     gt = GrassmannTensor(arrow, edges, tensor)
     U, S, Vh = gt.svd(free_names_u, cutoff=cutoff)
 
-    # reshape U
-    left_dim = math.prod(U.tensor.shape[:-1])
-    left_edge = list(U.edges[:-1])
-    U = U.reshape((left_dim, -1))
+    US = GrassmannTensor.contract(U, S, U.tensor.dim() - 1, 0)
+    USV = GrassmannTensor.contract(US, Vh, US.tensor.dim() - 1, 0)
 
-    # reshape Vh
-    right_dim = math.prod(Vh.tensor.shape[1:])
-    right_edge = list(Vh.edges[1:])
-    Vh = Vh.reshape((-1, right_dim))
-
-    US = GrassmannTensor.matmul(U, S)
-    USV = GrassmannTensor.matmul(US, Vh)
-
-    set_all = set(range(len(edges)))
-    set_u = set(free_names_u)
-    set_v = sorted(set_all - set_u)
-    perm_order = list(free_names_u) + list(set_v)
-    inv_perm = [perm_order.index(i) for i in range(len(edges))]
-
-    USV = USV.reshape(tuple(left_edge + right_edge))
-    USV = USV.permute(tuple(inv_perm))
+    left_legs, right_legs = gt.get_legs_pair(len(edges), free_names_u)
+    order = left_legs + right_legs
+    inv_order = gt.get_inv_order(USV.tensor.dim(), order)
+    USV = USV.permute(inv_order)
 
     masked = gt.update_mask().tensor
     den = masked.norm()

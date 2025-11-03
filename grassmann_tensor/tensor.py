@@ -308,7 +308,10 @@ class GrassmannTensor:
                 if (isinstance(new_shape_check, int) and new_shape_check == 1) or (
                     new_shape_check == (1, 0)
                 ):
-                    arrow.append(False)
+                    if cursor_plan < len(self.arrow):
+                        arrow.append(self.arrow[cursor_plan])
+                    else:
+                        arrow.append(False)
                     edges.append((1, 0))
                     shape.append(1)
                     cursor_plan += 1
@@ -573,22 +576,18 @@ class GrassmannTensor:
         self,
         pairs: tuple[int, ...] | tuple[tuple[int, ...], tuple[int, ...]],
     ) -> tuple[GrassmannTensor, tuple[int, ...], tuple[int, ...]]:
-        if (isinstance(pairs, tuple) and len(pairs)) and all(
-            isinstance(x, tuple) and all(isinstance(i, int) for i in x) for x in pairs
-        ):
-            left_legs = typing.cast(tuple[int, ...], pairs[0])
-            right_legs = typing.cast(tuple[int, ...], pairs[1])
-        else:
-            left_legs = typing.cast(tuple[int, ...], pairs)
-            right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
+        return self.group_edges(self, pairs)
 
-        assert self._check_pairs_coverage((left_legs, right_legs)), (
-            f"Input pairs must cover all dimension and disjoint, but got {(left_legs, right_legs)}"
-        )
+    @staticmethod
+    def group_edges(
+        tensor: GrassmannTensor,
+        pairs: tuple[int, ...] | tuple[tuple[int, ...], tuple[int, ...]],
+    ) -> tuple[GrassmannTensor, tuple[int, ...], tuple[int, ...]]:
+        left_legs, right_legs = GrassmannTensor.get_legs_pair(tensor.tensor.dim(), pairs)
 
         order = left_legs + right_legs
 
-        tensor = self.permute(order)
+        tensor = tensor.permute(order)
 
         left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
         right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
@@ -596,6 +595,42 @@ class GrassmannTensor:
         tensor = tensor.reshape((left_dim, right_dim))
 
         return tensor, left_legs, right_legs
+
+    @staticmethod
+    def get_legs_pair(
+        dim: int, pairs: tuple[int, ...] | tuple[tuple[int, ...], tuple[int, ...]]
+    ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        def check_pairs_coverage(dim: int, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> bool:
+            set0 = set(pairs[0])
+            set1 = set(pairs[1])
+
+            are_disjoint = set0.isdisjoint(set1)
+
+            is_complete_union = (set0 | set1) == set(range(dim))
+
+            no_duplicates = len(pairs[0]) + len(pairs[1]) == dim
+
+            return are_disjoint and is_complete_union and no_duplicates
+
+        if (isinstance(pairs, tuple) and len(pairs)) and all(
+            isinstance(x, tuple) and all(isinstance(i, int) for i in x) for x in pairs
+        ):
+            left_legs = typing.cast(tuple[int, ...], pairs[0])
+            right_legs = typing.cast(tuple[int, ...], pairs[1])
+        else:
+            left_legs = typing.cast(tuple[int, ...], pairs)
+            right_legs = tuple(i for i in range(dim) if i not in left_legs)
+
+        assert check_pairs_coverage(dim, (left_legs, right_legs)), (
+            f"Input pairs must cover all dimension and disjoint, but got {(left_legs, right_legs)}"
+        )
+
+        return left_legs, right_legs
+
+    def _get_legs_pair(
+        self, pairs: tuple[int, ...] | tuple[tuple[int, ...], tuple[int, ...]]
+    ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        return self.get_legs_pair(self.tensor.dim(), pairs)
 
     def svd(
         self,
@@ -622,7 +657,25 @@ class GrassmannTensor:
         if isinstance(cutoff, tuple):
             assert len(cutoff) == 2, "The length of cutoff must be 2 if cutoff is a tuple."
 
-        tensor, left_legs, right_legs = self._group_edges(free_names_u)
+        left_legs, right_legs = self._get_legs_pair(free_names_u)
+        order = left_legs + right_legs
+        tensor = self.permute(order)
+
+        arrow_reverse = tuple(i for i, current in enumerate(tensor.arrow) if current)
+        if arrow_reverse:
+            tensor = tensor.reverse(arrow_reverse).reverse(arrow_reverse).reverse(arrow_reverse)
+
+        left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
+        right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
+        tensor = tensor.reshape((left_dim, right_dim))
+
+        origin_arrow_left = tuple(self.arrow[i] for i in left_legs)
+        origin_arrow_right = tuple(self.arrow[i] for i in right_legs)
+
+        arrow_reverse_left = tuple(i for i, current in enumerate(origin_arrow_left) if current)
+        arrow_reverse_right = tuple(
+            i + 1 for i, current in enumerate(origin_arrow_right) if current
+        )
 
         (even_left, odd_left) = tensor.edges[0]
         (even_right, odd_right) = tensor.edges[1]
@@ -700,7 +753,7 @@ class GrassmannTensor:
             (Vh_even_trunc.shape[1], Vh_odd_trunc.shape[1]),
         )
 
-        U = GrassmannTensor(_arrow=(True, True), _edges=U_edges, _tensor=U_tensor)
+        U = GrassmannTensor(_arrow=(False, True), _edges=U_edges, _tensor=U_tensor)
         S = GrassmannTensor(
             _arrow=(
                 False,
@@ -709,52 +762,141 @@ class GrassmannTensor:
             _edges=S_edges,
             _tensor=torch.diag(S_tensor),
         )
-        Vh = GrassmannTensor(_arrow=(False, True), _edges=Vh_edges, _tensor=Vh_tensor)
-        # Split
-        left_arrow = [self.arrow[i] for i in left_legs]
-        left_edges = [self.edges[i] for i in left_legs]
+        Vh = GrassmannTensor(_arrow=(False, False), _edges=Vh_edges, _tensor=Vh_tensor)
 
-        right_arrow = [self.arrow[i] for i in right_legs]
+        left_edges = [self.edges[i] for i in left_legs]
         right_edges = [self.edges[i] for i in right_legs]
 
         U = U.reshape((*left_edges, U_edges[1]))
-        U._arrow = tuple(left_arrow + [True])
+        U = U.reverse(arrow_reverse_left)
 
         Vh = Vh.reshape((Vh_edges[0], *right_edges))
-        Vh._arrow = tuple([False] + right_arrow)
+        Vh = Vh.reverse(arrow_reverse_right)
 
         return U, S, Vh
 
-    def _get_inv_order(self, order: tuple[int, ...]) -> tuple[int, ...]:
-        inv = [0] * self.tensor.dim()
+    @staticmethod
+    def get_inv_order(dim: int, order: tuple[int, ...]) -> tuple[int, ...]:
+        inv = [0] * dim
         for new_position, origin_idx in enumerate(order):
             inv[origin_idx] = new_position
         return tuple(inv)
 
-    def _check_pairs_coverage(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> bool:
-        set0 = set(pairs[0])
-        set1 = set(pairs[1])
+    def _get_inv_order(self, order: tuple[int, ...]) -> tuple[int, ...]:
+        return self.get_inv_order(self.tensor.dim(), order)
 
-        are_disjoint = set0.isdisjoint(set1)
+    @staticmethod
+    def contract(
+        a: GrassmannTensor,
+        b: GrassmannTensor,
+        a_leg: int | tuple[int, ...],
+        b_leg: int | tuple[int, ...],
+    ) -> GrassmannTensor:
+        contract_lengths = []
+        for leg in (a_leg, b_leg):
+            if isinstance(leg, int):
+                contract_lengths.append(1)
+            else:
+                contract_lengths.append(len(leg))
+                assert all(a.arrow[i] == a.arrow[leg[0]] for i in leg), (
+                    "All the legs that need to be contracted must have the same arrow"
+                )
 
-        is_complete_union = (set0 | set1) == set(range(self.tensor.dim()))
+        contract_length_a, contract_length_b = contract_lengths
 
-        return are_disjoint and is_complete_union
+        a_leg_tuple = (a_leg,) if isinstance(a_leg, int) else a_leg
+        b_leg_tuple = (b_leg,) if isinstance(b_leg, int) else b_leg
+
+        a_range_list = tuple(range(a.tensor.dim()))
+        b_range_list = tuple(range(b.tensor.dim()))
+
+        a_contract_set = set(a_leg_tuple)
+        b_contract_set = set(b_leg_tuple)
+
+        order_a = tuple(i for i in a_range_list if i not in a_contract_set) + a_leg_tuple
+        order_b = b_leg_tuple + tuple(i for i in b_range_list if i not in b_contract_set)
+
+        tensor_a = a.permute(order_a)
+        tensor_b = b.permute(order_b)
+
+        assert (tensor_a.arrow[-1], tensor_b.arrow[0]) in ((False, True), (True, False)), (
+            f"Contract requires arrow (False, True) or (True, False), but got {tensor_a.arrow[-1], tensor_b.arrow[0]}"
+        )
+
+        arrow_after_permute_a = tensor_a.arrow
+        arrow_after_permute_b = tensor_b.arrow
+
+        edge_after_permute_a = tensor_a.edges
+        edge_after_permute_b = tensor_b.edges
+
+        arrow_expected_a = [i >= a.tensor.dim() - contract_length_a for i in range(a.tensor.dim())]
+        arrow_expected_b = [i >= contract_length_b for i in range(b.tensor.dim())]
+
+        arrow_reverse_a = tuple(
+            i
+            for i, (cur, exp) in enumerate(zip(arrow_after_permute_a, arrow_expected_a))
+            if cur != exp
+        )
+        arrow_reverse_b = tuple(
+            i
+            for i, (cur, exp) in enumerate(zip(arrow_after_permute_b, arrow_expected_b))
+            if cur != exp
+        )
+
+        if arrow_reverse_a:
+            tensor_a = (
+                tensor_a.reverse(arrow_reverse_a).reverse(arrow_reverse_a).reverse(arrow_reverse_a)
+            )
+        if arrow_reverse_b:
+            tensor_b = (
+                tensor_b.reverse(arrow_reverse_b).reverse(arrow_reverse_b).reverse(arrow_reverse_b)
+            )
+
+        tensor_a = tensor_a.reshape(
+            (
+                math.prod(tensor_a.tensor.shape[:-contract_length_a]),
+                math.prod(tensor_a.tensor.shape[-contract_length_a:]),
+            )
+        )
+        tensor_b = tensor_b.reshape(
+            (
+                math.prod(tensor_b.tensor.shape[:contract_length_b]),
+                math.prod(tensor_b.tensor.shape[contract_length_b:]),
+            )
+        )
+
+        c = tensor_a @ tensor_b
+
+        c = c.reshape(
+            (edge_after_permute_a[:-contract_length_a] + edge_after_permute_b[contract_length_b:])
+        )
+
+        arrow_reverse_c = tuple(
+            [i for i in arrow_reverse_a if i < a.tensor.dim() - contract_length_a]
+            + [
+                (a.tensor.dim() - contract_length_a) + (i - contract_length_b)
+                for i in arrow_reverse_b
+                if i >= contract_length_b
+            ]
+        )
+        c = c.reverse(arrow_reverse_c)
+        return c
 
     def exponential(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
         tensor, left_legs, right_legs = self._group_edges(pairs)
 
-        arrow_order = (False, True)
-        edges_to_reverse = tuple(
-            i for i, arrow in enumerate(arrow_order) if tensor.arrow[i] != arrow
+        assert tensor.arrow in ((False, True), (True, False)), (
+            f"Exponentiation requires arrow (False, True) or (True, False), but got {tensor.arrow}"
         )
-        if edges_to_reverse:
-            tensor = tensor.reverse(edges_to_reverse)
+
+        tensor_reverse_flag = tensor.arrow != (False, True)
+        if tensor_reverse_flag:
+            tensor = tensor.reverse((0, 1))
 
         left_dim, right_dim = tensor.tensor.shape
 
         assert left_dim == right_dim, (
-            f"Exponential requires a square operator, but got {left_dim} x {right_dim}."
+            f"Exponentiation requires a square operator, but got {left_dim} x {right_dim}."
         )
 
         (even_left, odd_left) = tensor.edges[0]
@@ -774,8 +916,8 @@ class GrassmannTensor:
 
         tensor_exp = dataclasses.replace(tensor, _tensor=tensor_exp)
 
-        if edges_to_reverse:
-            tensor_exp = tensor_exp.reverse(tuple(edges_to_reverse))
+        if tensor_reverse_flag:
+            tensor_exp = tensor_exp.reverse((0, 1))
 
         order = left_legs + right_legs
         edges_after_permute = tuple(self.edges[i] for i in order)
@@ -786,6 +928,47 @@ class GrassmannTensor:
         tensor_exp = tensor_exp.permute(inv_order)
 
         return tensor_exp
+
+    def identity(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
+        tensor, left_legs, right_legs = self._group_edges(pairs)
+
+        assert tensor.arrow in ((False, True), (True, False)), (
+            f"Identity requires arrow (False, True) or (True, False), but got {tensor.arrow}"
+        )
+
+        tensor_reverse_flag = tensor.arrow != (False, True)
+        if tensor_reverse_flag:
+            tensor = tensor.reverse((0, 1))
+
+        left_dim, right_dim = tensor.tensor.shape
+
+        assert left_dim == right_dim, (
+            f"Identity requires a square operator, but got {left_dim} x {right_dim}."
+        )
+
+        (even_left, odd_left) = tensor.edges[0]
+        (even_right, odd_right) = tensor.edges[1]
+
+        assert even_left == even_right and odd_left == odd_right, (
+            f"Parity blocks must be square, but got L=({even_left},{odd_left}), R=({even_right},{odd_right})"
+        )
+
+        I = torch.eye(left_dim, dtype=tensor.tensor.dtype, device=tensor.tensor.device)  # noqa: E741
+
+        tensor_identity = dataclasses.replace(tensor, _tensor=I)
+
+        if tensor_reverse_flag:
+            tensor_identity = tensor_identity.reverse((0, 1))
+
+        order = left_legs + right_legs
+        edges_after_permute = tuple(self.edges[i] for i in order)
+        tensor_identity = tensor_identity.reshape(edges_after_permute)
+
+        inv_order = self._get_inv_order(order)
+
+        tensor_identity = tensor_identity.permute(inv_order)
+
+        return tensor_identity
 
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (
