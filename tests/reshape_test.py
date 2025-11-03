@@ -225,6 +225,8 @@ def test_reshape_with_one_dimension(
     assert (
         len(a.arrow) == len(shape) and len(a.edges) == len(shape) and a.tensor.dim() == len(shape)
     )
+    if len(shape) > len(arrow):
+        assert all(not a.arrow[i] for i in range(len(arrow), len(shape)))
 
 
 def test_reshape_trailing_nontrivial_dim_raises() -> None:
