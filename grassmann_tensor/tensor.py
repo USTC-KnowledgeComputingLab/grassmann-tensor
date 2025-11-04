@@ -727,9 +727,12 @@ class GrassmannTensor:
     def exponential(self, pairs: tuple[int, ...]) -> GrassmannTensor:
         tensor, left_legs, right_legs = self._group_edges(pairs)
 
-        edges_to_reverse = [i for i in range(2) if tensor.arrow[i]]
+        arrow_order = (False, True)
+        edges_to_reverse = tuple(
+            i for i, arrow in enumerate(arrow_order) if tensor.arrow[i] != arrow
+        )
         if edges_to_reverse:
-            tensor = tensor.reverse(tuple(edges_to_reverse))
+            tensor = tensor.reverse(edges_to_reverse)
 
         left_dim, right_dim = tensor.tensor.shape
 
