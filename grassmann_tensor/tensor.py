@@ -571,12 +571,19 @@ class GrassmannTensor:
 
     def _group_edges(
         self,
-        left_legs: typing.Iterable[int],
+        pairs: tuple[int, ...] | tuple[tuple[int, ...], tuple[int, ...]],
     ) -> tuple[GrassmannTensor, tuple[int, ...], tuple[int, ...]]:
-        left_legs = tuple(int(i) for i in left_legs)
-        right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
-        assert set(left_legs) | set(right_legs) == set(range(self.tensor.dim())), (
-            "Left/right must cover all tensor legs."
+        if (isinstance(pairs, tuple) and len(pairs)) and all(
+            isinstance(x, tuple) and all(isinstance(i, int) for i in x) for x in pairs
+        ):
+            left_legs = typing.cast(tuple[int, ...], pairs[0])
+            right_legs = typing.cast(tuple[int, ...], pairs[1])
+        else:
+            left_legs = typing.cast(tuple[int, ...], pairs)
+            right_legs = tuple(i for i in range(self.tensor.dim()) if i not in left_legs)
+
+        assert self._check_pairs_coverage((left_legs, right_legs)), (
+            f"Input pairs must cover all dimension and disjoint, but got {(left_legs, right_legs)}"
         )
 
         order = left_legs + right_legs
@@ -724,7 +731,17 @@ class GrassmannTensor:
             inv[origin_idx] = new_position
         return tuple(inv)
 
-    def exponential(self, pairs: tuple[int, ...]) -> GrassmannTensor:
+    def _check_pairs_coverage(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> bool:
+        set0 = set(pairs[0])
+        set1 = set(pairs[1])
+
+        are_disjoint = set0.isdisjoint(set1)
+
+        is_complete_union = (set0 | set1) == set(range(self.tensor.dim()))
+
+        return are_disjoint and is_complete_union
+
+    def exponential(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
         tensor, left_legs, right_legs = self._group_edges(pairs)
 
         arrow_order = (False, True)
@@ -742,6 +759,10 @@ class GrassmannTensor:
 
         (even_left, odd_left) = tensor.edges[0]
         (even_right, odd_right) = tensor.edges[1]
+
+        assert even_left == even_right and odd_left == odd_right, (
+            f"Parity blocks must be square, but got L=({even_left},{odd_left}), R=({even_right},{odd_right})"
+        )
 
         even_tensor = tensor.tensor[:even_left, :even_right]
         odd_tensor = tensor.tensor[even_left:, even_right:]
