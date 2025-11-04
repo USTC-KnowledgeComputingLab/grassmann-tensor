@@ -10,14 +10,16 @@ def test_exponential() -> None:
         ((4, 4), (8, 8), (4, 4), (8, 8)),
         torch.randn(8, 16, 8, 16, dtype=torch.float64),
     )
-    a.exponential((0, 3))
+    b = a.exponential(((0, 3), (1, 2)))
+    c = a.exponential(((0, 3), (2, 1)))
+    assert not torch.allclose(b.tensor, c.tensor)
 
 
 def test_exponential_with_empty_parity_block() -> None:
     a = GrassmannTensor((False, True), ((1, 0), (1, 0)), torch.randn(1, 1))
-    a.exponential((0,))
+    a.exponential(((0,), (1,)))
     b = GrassmannTensor((False, True), ((0, 1), (0, 1)), torch.randn(1, 1))
-    b.exponential((0,))
+    b.exponential(((0,), (1,)))
 
 
 def test_exponential_assertation() -> None:
@@ -27,4 +29,4 @@ def test_exponential_assertation() -> None:
         torch.randn(4, 8, 16, 32, dtype=torch.float64),
     )
     with pytest.raises(AssertionError, match="Exponential requires a square operator"):
-        a.exponential((0, 2))
+        a.exponential(((0, 2), (1, 3)))
