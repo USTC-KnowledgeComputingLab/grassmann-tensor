@@ -308,7 +308,10 @@ class GrassmannTensor:
                 if (isinstance(new_shape_check, int) and new_shape_check == 1) or (
                     new_shape_check == (1, 0)
                 ):
-                    arrow.append(False)
+                    if cursor_plan < len(self.arrow):
+                        arrow.append(self.arrow[cursor_plan])
+                    else:
+                        arrow.append(False)
                     edges.append((1, 0))
                     shape.append(1)
                     cursor_plan += 1
@@ -744,17 +747,18 @@ class GrassmannTensor:
     def exponential(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
         tensor, left_legs, right_legs = self._group_edges(pairs)
 
-        arrow_order = (False, True)
-        edges_to_reverse = tuple(
-            i for i, arrow in enumerate(arrow_order) if tensor.arrow[i] != arrow
+        assert tensor.arrow in ((False, True), (True, False)), (
+            f"Exponentiation requires arrow (False, True) or (True, False), but got {tensor.arrow}"
         )
-        if edges_to_reverse:
-            tensor = tensor.reverse(edges_to_reverse)
+
+        tensor_reverse_flag = tensor.arrow != (False, True)
+        if tensor_reverse_flag:
+            tensor = tensor.reverse((0, 1))
 
         left_dim, right_dim = tensor.tensor.shape
 
         assert left_dim == right_dim, (
-            f"Exponential requires a square operator, but got {left_dim} x {right_dim}."
+            f"Exponentiation requires a square operator, but got {left_dim} x {right_dim}."
         )
 
         (even_left, odd_left) = tensor.edges[0]
@@ -774,8 +778,8 @@ class GrassmannTensor:
 
         tensor_exp = dataclasses.replace(tensor, _tensor=tensor_exp)
 
-        if edges_to_reverse:
-            tensor_exp = tensor_exp.reverse(tuple(edges_to_reverse))
+        if tensor_reverse_flag:
+            tensor_exp = tensor_exp.reverse((0, 1))
 
         order = left_legs + right_legs
         edges_after_permute = tuple(self.edges[i] for i in order)
@@ -786,6 +790,47 @@ class GrassmannTensor:
         tensor_exp = tensor_exp.permute(inv_order)
 
         return tensor_exp
+
+    def identity(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
+        tensor, left_legs, right_legs = self._group_edges(pairs)
+
+        assert tensor.arrow in ((False, True), (True, False)), (
+            f"Identity requires arrow (False, True) or (True, False), but got {tensor.arrow}"
+        )
+
+        tensor_reverse_flag = tensor.arrow != (False, True)
+        if tensor_reverse_flag:
+            tensor = tensor.reverse((0, 1))
+
+        left_dim, right_dim = tensor.tensor.shape
+
+        assert left_dim == right_dim, (
+            f"Identity requires a square operator, but got {left_dim} x {right_dim}."
+        )
+
+        (even_left, odd_left) = tensor.edges[0]
+        (even_right, odd_right) = tensor.edges[1]
+
+        assert even_left == even_right and odd_left == odd_right, (
+            f"Parity blocks must be square, but got L=({even_left},{odd_left}), R=({even_right},{odd_right})"
+        )
+
+        I = torch.eye(left_dim, dtype=tensor.tensor.dtype, device=tensor.tensor.device)  # noqa: E741
+
+        tensor_identity = dataclasses.replace(tensor, _tensor=I)
+
+        if tensor_reverse_flag:
+            tensor_identity = tensor_identity.reverse((0, 1))
+
+        order = left_legs + right_legs
+        edges_after_permute = tuple(self.edges[i] for i in order)
+        tensor_identity = tensor_identity.reshape(edges_after_permute)
+
+        inv_order = self._get_inv_order(order)
+
+        tensor_identity = tensor_identity.permute(inv_order)
+
+        return tensor_identity
 
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (
