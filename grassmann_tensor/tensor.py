@@ -793,12 +793,12 @@ class GrassmannTensor:
         b_leg: int | tuple[int, ...],
     ) -> GrassmannTensor:
         contract_lengths = []
-        for leg in (a_leg, b_leg):
+        for leg, tensor in ((a_leg, a), (b_leg, b)):
             if isinstance(leg, int):
                 contract_lengths.append(1)
             else:
                 contract_lengths.append(len(leg))
-                assert all(a.arrow[i] == a.arrow[leg[0]] for i in leg), (
+                assert all(tensor.arrow[i] == tensor.arrow[leg[0]] for i in leg), (
                     "All the legs that need to be contracted must have the same arrow"
                 )
 

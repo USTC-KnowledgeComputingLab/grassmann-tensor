@@ -7,14 +7,15 @@ from grassmann_tensor import GrassmannTensor
 def test_contract() -> None:
     a = GrassmannTensor(
         (False, False, False, True),
-        ((2, 2), (4, 4), (8, 8), (32, 32)),
-        torch.randn(4, 8, 16, 64, dtype=torch.float64),
+        ((2, 2), (4, 4), (8, 8), (8, 8)),
+        torch.randn(4, 8, 16, 16, dtype=torch.float64),
     )
     b = GrassmannTensor(
         (False, True, True, True),
-        ((2, 2), (4, 4), (4, 4), (32, 32)),
-        torch.randn(4, 8, 8, 64, dtype=torch.float64),
+        ((8, 8), (4, 4), (4, 4), (32, 32)),
+        torch.randn(16, 8, 8, 64, dtype=torch.float64),
     )
+    _ = GrassmannTensor.contract(a, b, 3, 0)
     _ = GrassmannTensor.contract(a, b, (0, 2), 3)
     _ = GrassmannTensor.contract(a, b, (0, 2), (1, 2))
 
