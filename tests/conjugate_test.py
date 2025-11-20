@@ -84,13 +84,13 @@ def test_conjugate_reverse_order_of_contraction(
     a = create_random_tensor(arrow_edges, dtype=torch.complex128).update_mask()
     b = create_random_tensor(arrow_edges, dtype=torch.complex128).update_mask()
 
-    contrast_a = GrassmannTensor.contract(a, b, a.tensor.dim() - 1, 0)
+    contrast_a = a.contract(b, a.tensor.dim() - 1, 0)
     contrast_a = contrast_a.conj()
 
     a_conj = a.conj()
     b_conj = b.conj()
 
-    contrast_b = GrassmannTensor.contract(a_conj, b_conj, a_conj.tensor.dim() - 1, 0)
+    contrast_b = a_conj.contract(b_conj, a_conj.tensor.dim() - 1, 0)
 
     assert contrast_a.arrow == contrast_b.arrow
     assert torch.allclose(contrast_a.tensor, contrast_b.tensor)
