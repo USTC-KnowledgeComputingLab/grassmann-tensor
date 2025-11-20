@@ -106,8 +106,8 @@ def test_svd(
     gt = GrassmannTensor(arrow, edges, tensor)
     U, S, Vh = gt.svd(free_names_u, cutoff=cutoff)
 
-    US = GrassmannTensor.contract(U, S, U.tensor.dim() - 1, 0)
-    USV = GrassmannTensor.contract(US, Vh, US.tensor.dim() - 1, 0)
+    US = U.contract(S, U.tensor.dim() - 1, 0)
+    USV = US.contract(Vh, US.tensor.dim() - 1, 0)
 
     left_legs, right_legs = gt.get_legs_pair(len(edges), free_names_u)
     order = left_legs + right_legs

@@ -15,9 +15,9 @@ def test_contract() -> None:
         ((8, 8), (4, 4), (4, 4), (32, 32)),
         torch.randn(16, 8, 8, 64, dtype=torch.float64),
     )
-    _ = GrassmannTensor.contract(a, b, 3, 0)
-    _ = GrassmannTensor.contract(a, b, (0, 2), 3)
-    _ = GrassmannTensor.contract(a, b, (0, 2), (1, 2))
+    _ = a.contract(b, 3, 0)
+    _ = a.contract(b, (0, 2), 3)
+    _ = a.contract(b, (0, 2), (1, 2))
 
 
 def test_contract_assertion() -> None:
@@ -28,8 +28,8 @@ def test_contract_assertion() -> None:
         torch.randn(4, 8, 16, 32, dtype=torch.float64),
     )
     with pytest.raises(AssertionError, match="Contract requires arrow"):
-        _ = a.contract(a, b, 0, 0)
+        _ = a.contract(b, 0, 0)
     with pytest.raises(
         AssertionError, match="All the legs that need to be contracted must have the same arrow"
     ):
-        _ = a.contract(a, b, 0, (0, 1))
+        _ = a.contract(b, 0, (0, 1))

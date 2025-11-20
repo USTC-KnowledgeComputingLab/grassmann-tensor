@@ -10,6 +10,7 @@ import dataclasses
 import functools
 import typing
 import math
+
 import torch
 
 
@@ -785,13 +786,14 @@ class GrassmannTensor:
     def _get_inv_order(self, order: tuple[int, ...]) -> tuple[int, ...]:
         return self.get_inv_order(self.tensor.dim(), order)
 
-    @staticmethod
     def contract(
-        a: GrassmannTensor,
+        self,
         b: GrassmannTensor,
         a_leg: int | tuple[int, ...],
         b_leg: int | tuple[int, ...],
     ) -> GrassmannTensor:
+        a = self
+
         contract_lengths = []
         for leg, tensor in ((a_leg, a), (b_leg, b)):
             if isinstance(leg, int):
