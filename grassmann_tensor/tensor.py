@@ -970,6 +970,36 @@ class GrassmannTensor:
 
         return tensor_identity
 
+    def conjugate(self) -> GrassmannTensor:
+        tensor_conj = self.tensor.conj()
+
+        dim = self.tensor.dim()
+        parity = self.parity
+
+        total_parity = functools.reduce(
+            torch.logical_xor,
+            (
+                torch.logical_and(
+                    self._unsqueeze(parity[i], i, dim),
+                    self._unsqueeze(parity[j], j, dim),
+                )
+                for j in range(dim)
+                for i in range(0, j)
+            ),
+            torch.zeros([], dtype=torch.bool, device=self.tensor.device),
+        )
+
+        tensor_conj = torch.where(total_parity, -tensor_conj, tensor_conj)
+
+        return dataclasses.replace(
+            self,
+            _arrow=tuple(not arrow for arrow in self.arrow),
+            _tensor=tensor_conj,
+        )
+
+    def conj(self) -> GrassmannTensor:
+        return self.conjugate()
+
     def __post_init__(self) -> None:
         assert len(self._arrow) == self._tensor.dim(), (
             f"Arrow length ({len(self._arrow)}) must match tensor dimensions ({self._tensor.dim()})."
