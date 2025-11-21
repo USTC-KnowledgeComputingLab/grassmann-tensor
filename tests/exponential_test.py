@@ -93,7 +93,7 @@ def test_exponential_via_taylor_expansion(
     order = left_legs + right_legs
     edges_after_permute = tuple(tensor.edges[i] for i in order)
     tensor_taylor_expansion = tensor_taylor_expansion.reshape(edges_after_permute)
-    inv_order = tensor._get_inv_order(order)
+    inv_order = tensor.get_inv_order(order)
     tensor_taylor_expansion = tensor_taylor_expansion.permute(inv_order)
 
     assert torch.allclose(tensor_taylor_expansion.tensor, tensor_exp.tensor)
