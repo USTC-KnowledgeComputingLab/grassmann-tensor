@@ -111,7 +111,7 @@ def test_svd(
 
     left_legs, right_legs = gt.get_legs_pair(len(edges), free_names_u)
     order = left_legs + right_legs
-    inv_order = gt.get_inv_order(USV.tensor.dim(), order)
+    inv_order = gt.get_inv_order(order)
     USV = USV.permute(inv_order)
 
     masked = gt.update_mask().tensor

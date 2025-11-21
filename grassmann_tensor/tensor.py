@@ -777,14 +777,11 @@ class GrassmannTensor:
         return U, S, Vh
 
     @staticmethod
-    def get_inv_order(dim: int, order: tuple[int, ...]) -> tuple[int, ...]:
-        inv = [0] * dim
+    def get_inv_order(order: tuple[int, ...]) -> tuple[int, ...]:
+        inv = [0] * len(order)
         for new_position, origin_idx in enumerate(order):
             inv[origin_idx] = new_position
         return tuple(inv)
-
-    def _get_inv_order(self, order: tuple[int, ...]) -> tuple[int, ...]:
-        return self.get_inv_order(self.tensor.dim(), order)
 
     def contract(
         self,
@@ -925,7 +922,7 @@ class GrassmannTensor:
         edges_after_permute = tuple(self.edges[i] for i in order)
         tensor_exp = tensor_exp.reshape(edges_after_permute)
 
-        inv_order = self._get_inv_order(order)
+        inv_order = self.get_inv_order(order)
 
         tensor_exp = tensor_exp.permute(inv_order)
 
@@ -966,7 +963,7 @@ class GrassmannTensor:
         edges_after_permute = tuple(self.edges[i] for i in order)
         tensor_identity = tensor_identity.reshape(edges_after_permute)
 
-        inv_order = self._get_inv_order(order)
+        inv_order = self.get_inv_order(order)
 
         tensor_identity = tensor_identity.permute(inv_order)
 
