@@ -237,3 +237,31 @@ def test_svd_int_cutoff_odd_block_empty_select_from_even_only(a: int, b: int, k:
     assert U.edges[-1] == (expected_k, 0)
     assert Vh.edges[0] == (expected_k, 0)
     assert S.edges == ((expected_k, 0), (expected_k, 0))
+
+
+devices = [torch.device("cpu")]
+if torch.cuda.is_available():
+    devices.append(torch.device("cuda"))
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        torch.float64,
+        torch.complex128,
+    ],
+)
+@pytest.mark.parametrize("device", devices)
+def test_svd_dtype_device_continuity(dtype: torch.dtype, device: torch.device) -> None:
+    a = GrassmannTensor(
+        (True, True, True, True),
+        ((2, 2), (4, 4), (8, 8), (16, 16)),
+        torch.randn(4, 8, 16, 32, dtype=dtype, device=device),
+    )
+    u, s, vh = a.svd((0,), cutoff=1)
+    assert u.tensor.dtype == dtype
+    assert s.tensor.dtype == dtype
+    assert vh.tensor.dtype == dtype
+    assert u.tensor.device == device
+    assert s.tensor.device == device
+    assert vh.tensor.device == device

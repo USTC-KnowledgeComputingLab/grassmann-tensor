@@ -741,6 +741,10 @@ class GrassmannTensor:
         S_tensor = torch.cat([S_even_trunc, S_odd_trunc], dim=0)
         Vh_tensor = torch.block_diag(Vh_even_trunc, Vh_odd_trunc)  # type: ignore[no-untyped-call]
 
+        U_tensor = U_tensor.to(dtype=self.tensor.dtype, device=self.tensor.device)
+        S_tensor = S_tensor.to(dtype=self.tensor.dtype, device=self.tensor.device)
+        Vh_tensor = Vh_tensor.to(dtype=self.tensor.dtype, device=self.tensor.device)
+
         U_edges = (
             (U_even_trunc.shape[0], U_odd_trunc.shape[0]),
             (U_even_trunc.shape[1], U_odd_trunc.shape[1]),
