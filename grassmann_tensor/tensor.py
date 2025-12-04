@@ -790,99 +790,165 @@ class GrassmannTensor:
     def contract(
         self,
         b: GrassmannTensor,
-        a_leg: int | tuple[int, ...],
-        b_leg: int | tuple[int, ...],
+        leg_a: int | tuple[int, ...],
+        leg_b: int | tuple[int, ...],
     ) -> GrassmannTensor:
+        """
+        This function is used to contract the GrassmannTensor with other GrassmannTensors.
+        For two fermion tensors A and B, their edges are divided into two groups: common edges and free edges.
+        Common edges connect each other, while the other edges are free edges.
+        The following operations are performed in sequence:
+        1. `Permutation`
+        Place all free edges in A on the left and common edges on the right, while place all common edges in B on
+        left and free edges on the right.
+        2. `Reverse`
+        Reverse the fermionic arrows of all free edges in A to False. If a sign is generated, the sign is not placed in
+        this tensor. Reverse the fermionic arrows of all common edges in A to True. If a sign is generated, the sign is
+        placed in this tensor. Reverse the fermionic arrows of all free edges in B to False. If a sign is generated, the
+        sign is not placed in this tensor. Reverse the fermionic arrows of all common edges in B to False. If a sign is
+        generated, the sign is not placed in this tensor.
+        3. `Merge`
+        If merging free edges of A generates a sign, it is not included in this tensor; If merging common edges of A
+        generates a sign, it is included in this tensor; If merging free edges of B generates a sign, it is not included
+        in this tensor; If merging common edges of B generates a sign, it is not included in this tensor.
+        4. `Matrix multiplication`
+        5. `Split`
+        Split the remaining two free edges to restore the original shape of the tensor, and do not place any of the
+        generated signs in this tensor.
+        6. `Reverse`
+        Reverse the fermionic arrows back to their original orientation in A and B, and the resulting sign is not placed
+        in this tensor.
+        """
         a = self
 
-        contract_lengths = []
-        for leg, tensor in ((a_leg, a), (b_leg, b)):
-            if isinstance(leg, int):
-                contract_lengths.append(1)
-            else:
-                contract_lengths.append(len(leg))
-                assert all(tensor.arrow[i] == tensor.arrow[leg[0]] for i in leg), (
-                    "All the legs that need to be contracted must have the same arrow"
-                )
+        leg_tuple_a = (leg_a,) if isinstance(leg_a, int) else leg_a
+        leg_tuple_b = (leg_b,) if isinstance(leg_b, int) else leg_b
 
-        contract_length_a, contract_length_b = contract_lengths
-
-        a_leg_tuple = (a_leg,) if isinstance(a_leg, int) else a_leg
-        b_leg_tuple = (b_leg,) if isinstance(b_leg, int) else b_leg
-
-        a_range_list = tuple(range(a.tensor.dim()))
-        b_range_list = tuple(range(b.tensor.dim()))
-
-        a_contract_set = set(a_leg_tuple)
-        b_contract_set = set(b_leg_tuple)
-
-        order_a = tuple(i for i in a_range_list if i not in a_contract_set) + a_leg_tuple
-        order_b = b_leg_tuple + tuple(i for i in b_range_list if i not in b_contract_set)
-
-        tensor_a = a.permute(order_a)
-        tensor_b = b.permute(order_b)
-
-        assert (tensor_a.arrow[-1], tensor_b.arrow[0]) in ((False, True), (True, False)), (
-            f"Contract requires arrow (False, True) or (True, False), but got {tensor_a.arrow[-1], tensor_b.arrow[0]}"
-        )
-
-        arrow_after_permute_a = tensor_a.arrow
-        arrow_after_permute_b = tensor_b.arrow
-
-        edge_after_permute_a = tensor_a.edges
-        edge_after_permute_b = tensor_b.edges
-
-        arrow_expected_a = [i >= a.tensor.dim() - contract_length_a for i in range(a.tensor.dim())]
-        arrow_expected_b = [i >= contract_length_b for i in range(b.tensor.dim())]
-
-        arrow_reverse_a = tuple(
-            i
-            for i, (cur, exp) in enumerate(zip(arrow_after_permute_a, arrow_expected_a))
-            if cur != exp
-        )
-        arrow_reverse_b = tuple(
-            i
-            for i, (cur, exp) in enumerate(zip(arrow_after_permute_b, arrow_expected_b))
-            if cur != exp
-        )
-
-        if arrow_reverse_a:
-            tensor_a = (
-                tensor_a.reverse(arrow_reverse_a).reverse(arrow_reverse_a).reverse(arrow_reverse_a)
-            )
-        if arrow_reverse_b:
-            tensor_b = (
-                tensor_b.reverse(arrow_reverse_b).reverse(arrow_reverse_b).reverse(arrow_reverse_b)
+        for tensor, leg in ((a, leg_tuple_a), (b, leg_tuple_b)):
+            assert len(set(leg)) == len(leg), f"Indices must be unique. Got {leg}."
+            assert all(0 <= i < tensor.tensor.dim() for i in leg), (
+                f"Indices must be within tensor dimensions. Got {leg}."
             )
 
-        tensor_a = tensor_a.reshape(
+        contract_length_a, contract_length_b = (
+            1 if isinstance(leg, int) else len(leg) for leg in (leg_a, leg_b)
+        )
+
+        dim_a = a.tensor.dim()
+        dim_b = b.tensor.dim()
+
+        right_leg_a, left_leg_a = self.get_legs_pair(dim_a, leg_tuple_a)
+        left_leg_b, right_leg_b = self.get_legs_pair(dim_b, leg_tuple_b)
+
+        order_a = left_leg_a + right_leg_a
+        order_b = left_leg_b + right_leg_b
+
+        # 1. Permutation
+        a = a.permute(order_a)
+        b = b.permute(order_b)
+
+        arrow = a.arrow[:-contract_length_a] + b.arrow[contract_length_b:]
+        edges = a.edges[:-contract_length_a] + b.edges[contract_length_b:]
+        shape = a.tensor.shape[:-contract_length_a] + b.tensor.shape[contract_length_b:]
+
+        # 2. Reverse
+        # Reverse tensor `a`
+        arrow_after_reverse_a = tuple(
+            [False] * (dim_a - contract_length_a) + [True] * contract_length_a
+        )
+
+        tensor_after_reverse = a.tensor
+        # Only calculate the sign of common edges of `a`
+        parity_index = tuple(range(dim_a - contract_length_a, dim_a))
+        reversing_parity = functools.reduce(
+            torch.logical_xor,
             (
-                math.prod(tensor_a.tensor.shape[:-contract_length_a]),
-                math.prod(tensor_a.tensor.shape[-contract_length_a:]),
-            )
+                self._unsqueeze(parity, index, self.tensor.dim())
+                for index, parity in enumerate(a.parity)
+                if index in parity_index and not a.arrow[index]
+            ),
+            torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
-        tensor_b = tensor_b.reshape(
+        tensor_after_reverse = torch.where(
+            reversing_parity, -tensor_after_reverse, +tensor_after_reverse
+        )
+
+        a = dataclasses.replace(
+            a,
+            _arrow=arrow_after_reverse_a,
+            _tensor=tensor_after_reverse,
+        )
+
+        # 3. Merge
+        # Merge tensor `a` free edges
+        arrow_merge_free_edges = tuple([False] + [True] * contract_length_a)
+        edges_merge_free_edges = typing.cast(
+            tuple[tuple[int, int], ...],
+            (a.calculate_even_odd(a.edges[:-contract_length_a]), *a.edges[-contract_length_a:]),
+        )
+        shape_merge_free_edges = (
+            math.prod(a.tensor.shape[:-contract_length_a]),
+            *a.tensor.shape[-contract_length_a:],
+        )
+        tensor_merge_free_edges = a.tensor.reshape(shape_merge_free_edges)
+        a = dataclasses.replace(
+            a,
+            _arrow=arrow_merge_free_edges,
+            _edges=edges_merge_free_edges,
+            _tensor=tensor_merge_free_edges,
+        )
+
+        # Merge tensor `a` common edges
+        arrow_merge_common_edges = (False, True)
+        shape_merge_common_edges = (a.tensor.shape[0], math.prod(a.tensor.shape[1:]))
+        even, odd, reorder, sign = self._reorder_indices(a.edges[1:])
+        edges_merge_common_edges = typing.cast(
+            tuple[tuple[int, int], ...],
+            (a.edges[0], (even, odd)),
+        )
+        tensor_merge_common_edges = a.tensor.reshape(shape_merge_common_edges)
+        merging_parity = functools.reduce(
+            torch.logical_xor,
+            (self._unsqueeze(sign, 1, tensor_merge_common_edges.dim())),
+            torch.zeros([], dtype=torch.bool, device=self.tensor.device),
+        )
+        tensor_merge_common_edges = torch.where(
+            merging_parity, -tensor_merge_common_edges, +tensor_merge_common_edges
+        )
+        tensor_merge_common_edges = tensor_merge_common_edges.index_select(1, reorder)
+
+        a = dataclasses.replace(
+            a,
+            _arrow=arrow_merge_common_edges,
+            _edges=edges_merge_common_edges,
+            _tensor=tensor_merge_common_edges,
+        )
+
+        # Reverse and merge tensor `b`
+        arrow_after_reverse_merge_b = (False, True)
+        edges_after_reverse_merge_b = (
+            self.calculate_even_odd(b.edges[:contract_length_b]),
+            self.calculate_even_odd(b.edges[contract_length_b:]),
+        )
+        tensor_after_reverse_merge_b = b.tensor.reshape(
             (
-                math.prod(tensor_b.tensor.shape[:contract_length_b]),
-                math.prod(tensor_b.tensor.shape[contract_length_b:]),
+                math.prod(b.tensor.shape[:contract_length_b]),
+                math.prod(b.tensor.shape[contract_length_b:]),
             )
         )
 
-        c = tensor_a @ tensor_b
-
-        c = c.reshape(
-            (edge_after_permute_a[:-contract_length_a] + edge_after_permute_b[contract_length_b:])
+        b = dataclasses.replace(
+            b,
+            _arrow=arrow_after_reverse_merge_b,
+            _edges=edges_after_reverse_merge_b,
+            _tensor=tensor_after_reverse_merge_b,
         )
 
-        arrow_reverse_c = tuple(
-            [i for i in arrow_reverse_a if i < a.tensor.dim() - contract_length_a]
-            + [
-                (a.tensor.dim() - contract_length_a) + (i - contract_length_b)
-                for i in arrow_reverse_b
-                if i >= contract_length_b
-            ]
-        )
-        c = c.reverse(arrow_reverse_c)
+        # 4. Matrix multiplication
+        c = a @ b
+
+        # Split and reverse back
+        c = dataclasses.replace(c, _arrow=arrow, _edges=edges, _tensor=c.tensor.reshape(shape))
         return c
 
     def exponential(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
