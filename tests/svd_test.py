@@ -241,7 +241,7 @@ def test_svd_int_cutoff_odd_block_empty_select_from_even_only(a: int, b: int, k:
 
 devices = [torch.device("cpu")]
 if torch.cuda.is_available():
-    devices.append(torch.device("cuda"))
+    devices.append(torch.device("cuda:0"))
 
 
 @pytest.mark.parametrize(

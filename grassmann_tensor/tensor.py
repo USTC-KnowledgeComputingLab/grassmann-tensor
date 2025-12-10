@@ -901,7 +901,7 @@ class GrassmannTensor:
         # Merge tensor `a` common edges
         arrow_merge_common_edges = (False, True)
         shape_merge_common_edges = (a.tensor.shape[0], math.prod(a.tensor.shape[1:]))
-        even, odd, reorder, sign = self._reorder_indices(a.edges[1:])
+        even, odd, _, sign = self._reorder_indices(a.edges[1:])
         edges_merge_common_edges = typing.cast(
             tuple[tuple[int, int], ...],
             (a.edges[0], (even, odd)),
@@ -915,7 +915,6 @@ class GrassmannTensor:
         tensor_merge_common_edges = torch.where(
             merging_parity, -tensor_merge_common_edges, +tensor_merge_common_edges
         )
-        tensor_merge_common_edges = tensor_merge_common_edges.index_select(1, reorder)
 
         a = dataclasses.replace(
             a,
