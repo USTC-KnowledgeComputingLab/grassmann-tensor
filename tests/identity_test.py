@@ -1,11 +1,13 @@
 import pytest
 import torch
-from typing import TypeAlias
+import typing
 
-from grassmann_tensor import GrassmannTensor
+from grassmann_tensor import GrassmannTensor, NamedGrassmannTensor
 
-Tensor: TypeAlias = GrassmannTensor
-Pairs: TypeAlias = tuple[tuple[int, ...], tuple[int, ...]]
+Tensor: typing.TypeAlias = GrassmannTensor
+NamedTensor: typing.TypeAlias = NamedGrassmannTensor
+Pairs: typing.TypeAlias = tuple[tuple[int, ...], tuple[int, ...]]
+NamedPairs: typing.TypeAlias = set[tuple[str, str]]
 
 
 def test_identity_assertation() -> None:
@@ -81,3 +83,70 @@ def test_identity_via_self_multiplication(
     assert torch.allclose((identity @ identity).tensor, identity.tensor)
     assert torch.allclose((identity @ tensor).tensor, tensor.tensor)
     assert torch.allclose((tensor @ identity).tensor, tensor.tensor)
+
+
+def test_named_tensor_identity_assertation() -> None:
+    a = NamedGrassmannTensor(
+        ("a", "b", "c", "d"),
+        (True, True, True, True),
+        ((2, 2), (4, 4), (8, 8), (16, 16)),
+        torch.randn(4, 8, 16, 32, dtype=torch.float64),
+    )
+    with pytest.raises(AssertionError, match="Identity requires arrow"):
+        a.identity({("a", "b"), ("c", "d")})
+
+    b = NamedGrassmannTensor(
+        ("a", "b", "c", "d"),
+        (False, True, False, True),
+        ((2, 2), (4, 4), (8, 8), (16, 16)),
+        torch.randn(4, 8, 16, 32, dtype=torch.float64),
+    )
+    with pytest.raises(AssertionError, match="Identity requires a square operator"):
+        b.identity({("a", "b"), ("c", "d")})
+
+    c = NamedGrassmannTensor(
+        ("a", "b", "c", "d"),
+        (False, True, False, True),
+        ((1, 3), (3, 1), (3, 1), (3, 1)),
+        torch.randn(4, 4, 4, 4, dtype=torch.float64),
+    )
+    with pytest.raises(AssertionError, match="Parity blocks must be square"):
+        c.identity({("a", "b"), ("c", "d")})
+
+
+@pytest.mark.parametrize(
+    "tensor, pairs",
+    [
+        (
+            NamedGrassmannTensor(
+                ("a", "b"), (False, True), ((4, 4), (4, 4)), torch.randn(8, 8, dtype=torch.float64)
+            ),
+            {("a", "b")},
+        ),
+        (
+            NamedGrassmannTensor(
+                ("a", "b"), (True, False), ((4, 4), (4, 4)), torch.randn(8, 8, dtype=torch.float64)
+            ),
+            {("a", "b")},
+        ),
+        (
+            NamedGrassmannTensor(
+                ("a", "b", "c", "d"),
+                (False, False, True, True),
+                ((4, 4), (8, 8), (4, 4), (8, 8)),
+                torch.randn(8, 16, 8, 16, dtype=torch.float64),
+            ),
+            {("a", "c"), ("b", "d")},
+        ),
+    ],
+)
+def test_named_tensor_identity_via_self_multiplication(
+    tensor: NamedTensor,
+    pairs: NamedPairs,
+) -> None:
+    tensor = tensor.update_mask()
+    identity = tensor.identity(pairs)
+    contract_pairs = typing.cast(set[tuple[str, str]], {item[::-1] for item in pairs})
+    assert torch.allclose((identity.contract(identity, contract_pairs)).tensor, identity.tensor)
+    assert torch.allclose((identity.contract(tensor, contract_pairs)).tensor, tensor.tensor)
+    assert torch.allclose((tensor.contract(identity, contract_pairs)).tensor, tensor.tensor)

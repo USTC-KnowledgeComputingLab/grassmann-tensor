@@ -1,7 +1,7 @@
 import random
 import pytest
 import torch
-from grassmann_tensor import GrassmannTensor
+from grassmann_tensor import GrassmannTensor, NamedGrassmannTensor
 
 
 @pytest.mark.parametrize(
@@ -180,10 +180,8 @@ def test_reshape_equal_edges_nontrivial_merging_with_other_edge() -> None:
 def test_reshape_with_none() -> None:
     a = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
     assert len(a.arrow) == 0 and len(a.edges) == 0 and a.tensor.dim() == 0
-    b = GrassmannTensor((), (), torch.tensor(2333)).reshape(((1, 0), (1, 0))).reshape(())
-    assert len(b.arrow) == 0 and len(b.edges) == 0 and b.tensor.dim() == 0
-    c = GrassmannTensor((), (), torch.tensor(2333)).reshape((1, 1))
-    assert len(c.arrow) == 2 and len(c.edges) == 2 and c.tensor.dim() == 2
+    b = GrassmannTensor((), (), torch.tensor(2333)).reshape((1, 1))
+    assert len(b.arrow) == 2 and len(b.edges) == 2 and b.tensor.dim() == 2
 
 
 def test_reshape_with_none_edge_assertion() -> None:
@@ -289,3 +287,183 @@ def test_reshape_plan_exhausted_then_skip_trivial_self_edges() -> None:
     assert out.edges == ((2, 2),)
     assert out.tensor.shape == (4,)
     assert out.arrow == (False,)
+
+
+@pytest.mark.parametrize(
+    "arrow",
+    [
+        (i, j, k, l, m)
+        for i in [False, True]
+        for j in [False, True]
+        for k in [False, True]
+        for l in [False, True]  # noqa: E741
+        for m in [False, True]
+    ],
+)
+@pytest.mark.parametrize("plan_range", [(i, j) for i in range(5) for j in range(5) if j > i])
+def test_named_tensor_reshape_consistency(
+    arrow: tuple[bool, ...], plan_range: tuple[int, int]
+) -> None:
+    names = tuple(chr(ord("a") + i) for i in range(5))
+    l, h = plan_range  # noqa: E741
+    if not all(arrow[l:h]) and any(arrow[l:h]):
+        pytest.skip("Invalid reshape plan for the given arrow configuration.")
+    edge = (2, 2)
+    a = NamedGrassmannTensor(
+        names, arrow, (edge, edge, edge, edge, edge), torch.randn([4, 4, 4, 4, 4])
+    )
+    merged_name = f"m{l}_{h}"
+    merge_map: dict[str, tuple[str, ...]] = {merged_name: names[l:h]}
+
+    split_map: dict[str, tuple[tuple[str, tuple[int, int]], ...]] = {
+        merged_name: tuple((n, edge) for n in names[l:h])
+    }
+    b = a.merge_edge(merge_map)
+    c = b.split_edge(split_map)
+    assert torch.allclose(a.tensor, c.tensor)
+
+
+def test_named_tensor_merging_mixed_arrows() -> None:
+    names = ("a", "b", "c")
+    arrow = (True, False, True)
+    edges = ((2, 2), (2, 2), (2, 2))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 4, 4]))
+    with pytest.raises(AssertionError, match="Cannot merge edges with different arrows"):
+        _ = a.merge_edge({"a": ("a", "b", "c")})
+
+
+def test_named_tensor_splitting_dimension_mismatch_edges_because_of_unequal() -> None:
+    names = ("a",)
+    arrow = (True,)
+    edges = ((8, 8),)
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([16]))
+    _ = a.split_edge({"a": (("a", (2, 2)), ("b", (2, 2)))})
+    with pytest.raises(AssertionError, match="Dimension mismatch in splitting"):
+        _ = a.split_edge({"a": (("a", (4, 4)), ("b", (2, 2)))})
+
+
+def test_named_tensor_splitting_dimension_mismatch_edges_because_of_different_even_odd() -> None:
+    names = ("a", "b")
+    arrow = (True, True)
+    edges = ((3, 1), (2, 2))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 4]))
+    _ = a.split_edge({"a": (("a", (0, 1)), ("b", (3, 1)), ("c", (0, 1))), "b": (("d", (2, 2)),)})
+    with pytest.raises(AssertionError, match="Dimension mismatch in splitting"):
+        _ = a.split_edge({"a": (("a", (0, 1)), ("b", (2, 2))), "b": (("c", (0, 1)), ("d", (2, 2)))})
+    with pytest.raises(AssertionError, match="Dimension mismatch in splitting"):
+        _ = a.split_edge({"a": (("a", (0, 1)), ("b", (3, 1))), "b": (("c", (2, 2)),)})
+
+
+def test_named_tensor_splitting_shape_exceeds() -> None:
+    names = ("a",)
+    arrow = (False,)
+    edges = ((8, 8),)
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([16]))
+    with pytest.raises(AssertionError, match="New shape exceeds in splitting"):
+        _ = a.split_edge({"a": (("a", (1, 1)), ("b", (1, 1)))})
+
+
+def test_named_tensor_equal_edges_trivial() -> None:
+    names = ("a",)
+    arrow = (True,)
+    edges = ((2, 2),)
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4]))
+    _ = a.split_edge({"a": (("a", (2, 2)),)})
+
+
+def test_named_tensor_equal_edges_nontrivial_splitting() -> None:
+    names = ("a",)
+    arrow = (True,)
+    edges = ((1, 3),)
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4]))
+    _ = a.split_edge({"a": (("a", (3, 1)), ("b", (1, 0)), ("c", (0, 1)))})
+
+
+def test_named_tensor_equal_edges_nontrivial_splitting_with_other_edge() -> None:
+    names = ("a", "b")
+    arrow = (True, True)
+    edges = ((1, 3), (2, 2))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 4]))
+    _ = a.split_edge({"a": (("a", (3, 1)), ("b", (1, 0)), ("c", (0, 1))), "b": (("d", (2, 2)),)})
+
+
+def test_named_tensor_equal_edges_nontrivial_merging() -> None:
+    names = ("a", "b", "c")
+    arrow = (True, True, True)
+    edges = ((1, 3), (1, 0), (0, 1))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 1, 1]))
+    _ = a.merge_edge({"a": ("a", "b", "c")})
+
+
+def test_named_tensor_equal_edges_nontrivial_merging_with_other_edge() -> None:
+    names = ("a", "b", "c", "d")
+    arrow = (True, True, True, True)
+    edges = ((1, 3), (1, 0), (0, 1), (2, 2))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 1, 1, 4]))
+    _ = a.merge_edge({"a": ("a", "b", "c"), "b": ("d",)})
+
+
+def test_named_tensor_with_none() -> None:
+    a = (
+        NamedGrassmannTensor((), (), (), torch.tensor(2333))
+        .split_edge({"": (("a", (1, 0)), ("b", (1, 0)))})
+        .to_scalar()
+    )
+    assert len(a.arrow) == 0 and len(a.edges) == 0 and a.tensor.dim() == 0
+    b = NamedGrassmannTensor((), (), (), torch.tensor(2333)).split_edge(
+        {"": (("a", (1, 0)), ("b", (1, 0)))}
+    )
+    assert len(b.arrow) == 2 and len(b.edges) == 2 and b.tensor.dim() == 2
+
+
+def test_named_tensor_with_none_edge_assertion() -> None:
+    with pytest.raises(AssertionError, match="Only pure even edges can be merged into none edges"):
+        _ = NamedGrassmannTensor(
+            ("a", "b"), (True, True), ((0, 1), (1, 0)), torch.tensor([[2333]])
+        ).to_scalar()
+    with pytest.raises(AssertionError, match="Cannot split none edges into illegal edges"):
+        _ = NamedGrassmannTensor((), (), (), torch.tensor(2333)).split_edge({"": (("a", (0, 1)),)})
+    with pytest.raises(AssertionError, match="Cannot split none edges into illegal edges"):
+        _ = NamedGrassmannTensor((), (), (), torch.tensor(2333)).split_edge(
+            {"": (("a", (0, 1)), ("b", (1, 0)))}
+        )
+
+
+def test_named_tensor_plan_exhausted_then_skip_trivial_self_edges() -> None:
+    a = NamedGrassmannTensor(
+        ("a", "b", "c"),
+        (False, False, False),
+        ((2, 2), (1, 0), (1, 0)),
+        torch.randn(4, 1, 1),
+    )
+    out = a.merge_edge({"a": ("a", "b", "c")})
+    assert out.names == ("a",)
+    assert out.edges == ((2, 2),)
+    assert out.tensor.shape == (4,)
+    assert out.arrow == (False,)
+
+
+def test_named_tensor_permute() -> None:
+    a = NamedGrassmannTensor(
+        ("a", "b", "c"),
+        (False, False, False),
+        ((2, 2), (1, 0), (1, 0)),
+        torch.randn(4, 1, 1),
+    )
+    out = a.merge_edge({"a": ("a", "c")})
+    assert out.names == ("a", "b")
+    assert out.edges == ((2, 2), (1, 0))
+    assert out.tensor.shape == (4, 1)
+    assert out.arrow == (False, False)
+
+    out = a.merge_edge({"a": ("c", "a")})
+    assert out.names == ("a", "b")
+    assert out.edges == ((2, 2), (1, 0))
+    assert out.tensor.shape == (4, 1)
+    assert out.arrow == (False, False)
+
+    out = a.merge_edge({"b": ("b", "c")})
+    assert out.names == ("a", "b")
+    assert out.edges == ((2, 2), (1, 0))
+    assert out.tensor.shape == (4, 1)
+    assert out.arrow == (False, False)
