@@ -1,6 +1,6 @@
 import pytest
 import torch
-from grassmann_tensor.tensor import GrassmannTensor
+from grassmann_tensor.tensor import GrassmannTensor, NamedGrassmannTensor
 
 ReverseCase = tuple[
     tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor, tuple[int, ...], torch.Tensor
@@ -125,5 +125,149 @@ ReverseFailCase = tuple[
 def test_reverse_fail(x: ReverseFailCase) -> None:
     arrow, edges, tensor, reverse_by, message = x
     grassmann_tensor = GrassmannTensor(arrow, edges, tensor)
+    with pytest.raises(AssertionError, match=message):
+        grassmann_tensor.reverse(reverse_by)
+
+
+NamedReverseCase = tuple[
+    tuple[str, ...],
+    tuple[bool, ...],
+    tuple[tuple[int, int], ...],
+    torch.Tensor,
+    set[str],
+    torch.Tensor,
+]
+
+
+@pytest.mark.parametrize(
+    "x",
+    [
+        ((), (), (), torch.tensor(6), (), torch.tensor(6)),
+        (
+            ("a", "b"),
+            (False, False),
+            ((1, 1), (0, 0)),
+            torch.zeros([2, 0]),
+            ("a",),
+            torch.zeros([2, 0]),
+        ),
+        (
+            ("a", "b"),
+            (False, False),
+            ((1, 1), (0, 1)),
+            torch.tensor([[0], [4]]),
+            ("a",),
+            torch.tensor([[0], [4]]),
+        ),
+        (
+            ("a", "b"),
+            (False, False),
+            ((1, 1), (1, 1)),
+            torch.tensor([[1, 0], [0, 4]]),
+            (),
+            torch.tensor([[1, 0], [0, 4]]),
+        ),
+        (
+            ("a", "b"),
+            (False, False),
+            ((1, 1), (1, 1)),
+            torch.tensor([[1, 0], [0, 4]]),
+            ("a",),
+            torch.tensor([[1, 0], [0, 4]]),
+        ),
+        (
+            ("a", "b"),
+            (True, False),
+            ((1, 1), (1, 1)),
+            torch.tensor([[1, 0], [0, 4]]),
+            ("a",),
+            torch.tensor([[1, 0], [0, -4]]),
+        ),
+        (
+            ("a", "b"),
+            (False, False),
+            ((1, 1), (1, 1)),
+            torch.tensor([[1, 0], [0, 4]]),
+            ("b",),
+            torch.tensor([[1, 0], [0, 4]]),
+        ),
+        (
+            ("a", "b"),
+            (False, True),
+            ((1, 1), (1, 1)),
+            torch.tensor([[1, 0], [0, 4]]),
+            ("b",),
+            torch.tensor([[1, 0], [0, -4]]),
+        ),
+        (
+            ("a", "b", "c"),
+            (False, False, False),
+            ((1, 1), (1, 1), (1, 1)),
+            torch.tensor([[[1, 0], [0, 2]], [[0, 3], [4, 0]]]),
+            ("a",),
+            torch.tensor([[[1, 0], [0, 2]], [[0, 3], [4, 0]]]),
+        ),
+        (
+            ("a", "b", "c"),
+            (True, False, False),
+            ((1, 1), (1, 1), (1, 1)),
+            torch.tensor([[[1, 0], [0, 2]], [[0, 3], [4, 0]]]),
+            ("a",),
+            torch.tensor([[[1, 0], [0, 2]], [[0, -3], [-4, 0]]]),
+        ),
+        (
+            ("a", "b", "c"),
+            (False, True, True),
+            ((1, 1), (1, 1), (1, 1)),
+            torch.tensor([[[1, 0], [0, 2]], [[0, 3], [4, 0]]]),
+            ("c",),
+            torch.tensor([[[1, 0], [0, -2]], [[0, -3], [4, 0]]]),
+        ),
+        (
+            ("a", "b", "c"),
+            (True, False, True),
+            ((1, 1), (1, 1), (1, 1)),
+            torch.tensor([[[1, 0], [0, 2]], [[0, 3], [4, 0]]]),
+            ("a", "b"),
+            torch.tensor([[[1, 0], [0, 2]], [[0, -3], [-4, 0]]]),
+        ),
+        (
+            ("a", "b", "c"),
+            (True, True, True),
+            ((1, 1), (1, 1), (1, 1)),
+            torch.tensor([[[1, 0], [0, 2]], [[0, 3], [4, 0]]]),
+            ("a", "b"),
+            torch.tensor([[[1, 0], [0, -2]], [[0, -3], [4, 0]]]),
+        ),
+    ],
+)
+def test_named_tensor_reverse(x: NamedReverseCase) -> None:
+    names, arrow, edges, tensor, reverse_by, expected = x
+    grassmann_tensor = NamedGrassmannTensor(names, arrow, edges, tensor)
+    result = grassmann_tensor.reverse(reverse_by)
+    assert torch.allclose(result.tensor, expected)
+
+
+NamedReverseFailCase = tuple[
+    tuple[str, ...], tuple[bool, ...], tuple[tuple[int, int], ...], torch.Tensor, set[str], str
+]
+
+
+@pytest.mark.parametrize(
+    "x",
+    [
+        (
+            ("a", "b"),
+            (False, False),
+            ((1, 1), (1, 1)),
+            torch.tensor([[1, 0], [0, 4]]),
+            ("a", "a"),
+            "Indices must be unique",
+        ),
+    ],
+)
+def test_named_tensor_reverse_fail(x: NamedReverseFailCase) -> None:
+    names, arrow, edges, tensor, reverse_by, message = x
+    grassmann_tensor = NamedGrassmannTensor(names, arrow, edges, tensor)
     with pytest.raises(AssertionError, match=message):
         grassmann_tensor.reverse(reverse_by)

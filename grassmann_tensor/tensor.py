@@ -4,12 +4,13 @@ A Grassmann tensor class.
 
 from __future__ import annotations
 
-__all__ = ["GrassmannTensor"]
+__all__ = ["GrassmannTensor", "NamedGrassmannTensor"]
 
 import dataclasses
 import functools
 import typing
 import math
+import operator
 
 import torch
 
@@ -718,10 +719,6 @@ class GrassmannTensor:
                 f"Cutoff must be an integer or a tuple of two integers, but got {cutoff}"
             )
 
-        assert (k_even > 0 or n_even == 0) and (k_odd > 0 or n_odd == 0), (
-            "Per-block cutoff must be compatible with available singulars"
-        )
-
         keep_even = torch.zeros(n_even, dtype=torch.bool, device=S_even.device)
         keep_odd = torch.zeros(n_odd, dtype=torch.bool, device=S_odd.device)
         if k_even > 0:
@@ -1353,4 +1350,736 @@ class GrassmannTensor:
         return self.clone()
 
     def __deepcopy__(self, memo: dict) -> GrassmannTensor:
+        return self.clone()
+
+
+@dataclasses.dataclass
+class NamedGrassmannTensor:
+    _names: tuple[str, ...]
+    _arrow: tuple[bool, ...]
+    _edges: tuple[tuple[int, int], ...]
+    _tensor: torch.Tensor
+    _parity: tuple[torch.Tensor, ...] | None = None
+    _mask: torch.Tensor | None = None
+
+    _name_dict: dict[str, int] = dataclasses.field(init=False, repr=False)
+    _gt: GrassmannTensor = dataclasses.field(init=False, repr=False)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """
+        The names of the tensor, represented as a tuple of str.
+        """
+        return self._names
+
+    @property
+    def arrow(self) -> tuple[bool, ...]:
+        return self._arrow
+
+    @property
+    def edges(self) -> tuple[tuple[int, int], ...]:
+        return self._edges
+
+    @property
+    def tensor(self) -> torch.Tensor:
+        return self._tensor
+
+    @property
+    def gt(self) -> GrassmannTensor:
+        return self._gt
+
+    @property
+    def parity(self) -> tuple[torch.Tensor, ...]:
+        if self._parity is None:
+            self._parity = self.gt.parity
+        return self._parity
+
+    @property
+    def mask(self) -> torch.Tensor:
+        if self._mask is None:
+            self._mask = self.gt.mask
+        return self._mask
+
+    def update_mask(self) -> NamedGrassmannTensor:
+        tensor = self.gt.update_mask()
+        return dataclasses.replace(
+            self,
+            _tensor=tensor.tensor,
+        )
+
+    def rename(self, name_map: dict[str, str]) -> NamedGrassmannTensor:
+        if not name_map:
+            return self
+
+        names = tuple(name_map.get(name, name) for name in self.names)
+
+        if len(set(names)) != len(names):
+            raise ValueError(f"Duplicate names after rename: {names}")
+
+        return dataclasses.replace(self, _names=names)
+
+    def __post_init__(self) -> None:
+        assert len(self._names) == len(set(self._names)), (
+            f"Names must be unique, but got {self._names}"
+        )
+        assert len(self._names) == self._tensor.dim(), (
+            f"Names length ({len(self._names)}) must match tensor dimensions ({self._tensor.dim()})."
+        )
+        object.__setattr__(self, "_name_dict", {name: i for i, name in enumerate(self._names)})
+        gt = GrassmannTensor(
+            _arrow=self._arrow,
+            _edges=self._edges,
+            _tensor=self._tensor,
+            _parity=self._parity,
+            _mask=self._mask,
+        )
+        object.__setattr__(self, "_gt", gt)
+
+    def to(
+        self,
+        whatever: torch.device | torch.dtype | str | None = None,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> NamedGrassmannTensor:
+        tensor = self.gt.to(whatever, device=device, dtype=dtype)
+        return dataclasses.replace(
+            self,
+            _tensor=tensor.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def get_name_index(self, name: str) -> int:
+        try:
+            return self._name_dict[name]
+        except KeyError:
+            raise KeyError(f"{name!r} not in names list {self._names!r}") from None
+
+    def permute(self, before_by_after: tuple[str, ...]) -> NamedGrassmannTensor:
+        order = tuple(self.get_name_index(name) for name in before_by_after)
+        tensor = self.gt.permute(order)
+        return dataclasses.replace(
+            self,
+            _names=before_by_after,
+            _arrow=tensor.arrow,
+            _edges=tensor.edges,
+            _tensor=tensor.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def reverse(self, reversed_names: set[str]) -> NamedGrassmannTensor:
+        assert len(reversed_names) == len(set(reversed_names)), (
+            f"Indices must be unique, but got {reversed_names}"
+        )
+        indices = tuple(self.get_name_index(name) for name in reversed_names)
+        tensor = self.gt.reverse(indices)
+        return dataclasses.replace(
+            self,
+            _arrow=tensor.arrow,
+            _edges=tensor.edges,
+            _tensor=tensor.tensor,
+        )
+
+    def _merge_edge_get_names(self, merge_map: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+        reserved_names: list[str] = []
+        for name in self.names:
+            found = next(
+                (
+                    (new_name, old_names)
+                    for new_name, old_names in merge_map.items()
+                    if name in old_names
+                ),
+                None,
+            )
+            if found is None:
+                reserved_names.append(name)
+            else:
+                new_name, old_names = found
+                if name == old_names[0]:
+                    reserved_names.append(new_name)
+        return tuple(reserved_names)
+
+    @staticmethod
+    def _merge_edge_get_name_group(
+        name: str, merge_map: dict[str, tuple[str, ...]]
+    ) -> tuple[str, ...]:
+        merge_group = merge_map.get(name, None)
+        return (name,) if merge_group is None else merge_group
+
+    def merge_edge(
+        self,
+        merge_map: dict[str, tuple[str, ...]],
+    ) -> NamedGrassmannTensor:
+        all_old_names = [old_name for group in merge_map.values() for old_name in group]
+        assert len(all_old_names) == len(set(all_old_names)), (
+            f"Names must be unique, but got {all_old_names}"
+        )
+        assert all(len(old_names) > 0 for old_names in merge_map.values()), (
+            "Merge edge does not support empty old_names."
+        )
+        assert all(
+            all(old_name in self.names for old_name in old_names)
+            for old_names in merge_map.values()
+        ), f"Old names must be in names list, but got {merge_map.values()}"
+
+        merge_map = {
+            new_name: tuple(sorted(group, key=self.get_name_index))
+            for new_name, group in merge_map.items()
+        }
+
+        names = self._merge_edge_get_names(merge_map)
+
+        permuted_names: list[str] = functools.reduce(
+            operator.add,
+            (list(self._merge_edge_get_name_group(name, merge_map)) for name in names),
+            [],
+        )
+
+        permuted_tensor = self.permute(tuple(permuted_names))
+
+        new_edges: list[tuple[int, int]] = []
+
+        for new_name in names:
+            if new_name in merge_map:
+                old_names = merge_map[new_name]
+                merge_edges = tuple(
+                    permuted_tensor.edges[permuted_tensor.get_name_index(old_name)]
+                    for old_name in old_names
+                )
+                even, odd = permuted_tensor.gt.calculate_even_odd(merge_edges)
+                new_edges.append((even, odd))
+            else:
+                index = permuted_tensor.get_name_index(new_name)
+                new_edges.append(permuted_tensor.edges[index])
+
+        merged_tensor = permuted_tensor.gt.reshape(tuple(new_edges))
+
+        return dataclasses.replace(
+            self,
+            _names=names,
+            _arrow=merged_tensor.arrow,
+            _edges=merged_tensor.edges,
+            _tensor=merged_tensor.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def to_scalar(self) -> NamedGrassmannTensor:
+        tensor = self.gt.reshape(())
+        return dataclasses.replace(
+            self, _names=(), _arrow=(), _edges=(), _tensor=tensor.tensor, _parity=None, _mask=None
+        )
+
+    @staticmethod
+    def _split_edge_get_name_group(
+        name: str,
+        split_map: dict[str, tuple[tuple[str, tuple[int, int]], ...]],
+    ) -> list[str]:
+        split_group = split_map.get(name, None)
+        return [name] if split_group is None else [new_name for new_name, _ in split_group]
+
+    @staticmethod
+    def _split_edge_get_edge_group(
+        name: str,
+        edge: tuple[int, int],
+        split_map: dict[str, tuple[tuple[str, tuple[int, int]], ...]],
+    ) -> list[tuple[int, int]]:
+        split_group = split_map.get(name, None)
+        return [edge] if split_group is None else [new_edge for _, new_edge in split_group]
+
+    def split_edge(
+        self, split_map: dict[str, tuple[tuple[str, tuple[int, int]], ...]]
+    ) -> NamedGrassmannTensor:
+        new_names: tuple[str, ...]
+        new_edges: tuple[tuple[int, int], ...]
+        if len(self.names) == 0:
+            assert set(split_map.keys()) == {""}, (
+                "For scalar tensor, split_map must have only key ''."
+            )
+            new_group = split_map[""]
+            new_names = tuple(new_name for new_name, _ in new_group)
+            new_edges = tuple(new_edge for _, new_edge in new_group)
+
+            split_tensor = self.gt.reshape(new_edges)
+            return dataclasses.replace(
+                self,
+                _names=new_names,
+                _arrow=split_tensor.arrow,
+                _edges=split_tensor.edges,
+                _tensor=split_tensor.tensor,
+                _parity=None,
+                _mask=None,
+            )
+
+        assert all(old_name in self.names for old_name in split_map.keys()), (
+            f"Old name must be in names {self.names}"
+        )
+
+        new_names = tuple(
+            functools.reduce(
+                operator.add,
+                (self._split_edge_get_name_group(name, split_map) for name in self.names),
+                [],
+            )
+        )
+
+        new_edges = tuple(
+            functools.reduce(
+                operator.add,
+                (
+                    self._split_edge_get_edge_group(name, edge, split_map)
+                    for name, edge in zip(self.names, self.edges)
+                ),
+                [],
+            )
+        )
+
+        split_tensor = self.gt.reshape(new_edges)
+
+        return dataclasses.replace(
+            self,
+            _names=tuple(new_names),
+            _arrow=split_tensor.arrow,
+            _edges=split_tensor.edges,
+            _tensor=split_tensor.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def matmul(self, other: NamedGrassmannTensor) -> NamedGrassmannTensor:
+        tensor_a = self
+        tensor_b = other
+
+        vector_a = tensor_a.tensor.dim() == 1
+        vector_b = tensor_b.tensor.dim() == 1
+
+        names: list[str] = []
+        for i in range(-max(max(tensor_a.tensor.dim(), 2), max(tensor_b.tensor.dim(), 2)), -2):
+            candidate_a = candidate_b = 1
+            name_a = name_b = None
+            if i >= -tensor_a.tensor.dim():
+                candidate_a, _ = tensor_a.edges[i]
+                name_a = tensor_a.names[i]
+            if i >= -tensor_b.tensor.dim():
+                candidate_b, _ = tensor_b.edges[i]
+                name_b = tensor_b.names[i]
+            if candidate_a >= candidate_b:
+                picked_name = name_a if name_a is not None else name_b
+            else:
+                picked_name = name_b if name_b is not None else name_a
+            names.append(typing.cast(str, picked_name))
+
+        if not vector_a:
+            names.append(tensor_a.names[-2])
+        if not vector_b:
+            names.append(tensor_b.names[-1])
+
+        tensor = tensor_a.gt @ tensor_b.gt
+
+        return NamedGrassmannTensor(
+            _names=tuple(names),
+            _arrow=tensor.arrow,
+            _edges=tensor.edges,
+            _tensor=tensor.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def conjugate(self) -> NamedGrassmannTensor:
+        tensor = self.gt.conj()
+        return dataclasses.replace(
+            self,
+            _arrow=tensor.arrow,
+            _edges=tensor.edges,
+            _tensor=tensor.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def conj(self) -> NamedGrassmannTensor:
+        return self.conjugate()
+
+    def _get_left_right_indices(
+        self, pairs: set[tuple[str, str]]
+    ) -> tuple[tuple[str, ...], tuple[int, ...], tuple[int, ...]]:
+        pairs_map = {set_0: set_1 for set_0, set_1 in pairs}
+        left_set = set(pairs_map)
+        right_set = set(pairs_map.values())
+
+        are_disjoint = left_set.isdisjoint(right_set)
+        is_complete_union = (left_set | right_set) == set(self.names)
+        no_duplicates = len(left_set) + len(right_set) == len(self.names)
+
+        assert are_disjoint and is_complete_union and no_duplicates, (
+            f"Input pairs must cover all dimension and disjoint, but got {pairs_map}"
+        )
+
+        left_names = tuple(name for name in self.names if name in left_set)
+        right_names = tuple(pairs_map[name] for name in left_names)
+
+        names = left_names + right_names
+
+        left_idx = tuple(self.get_name_index(name) for name in left_names)
+        right_idx = tuple(self.get_name_index(name) for name in right_names)
+
+        return names, left_idx, right_idx
+
+    def exponential(self, pairs: set[tuple[str, str]]) -> NamedGrassmannTensor:
+        names, left_idx, right_idx = self._get_left_right_indices(pairs)
+
+        exp = self.gt.exponential((left_idx, right_idx))
+
+        return dataclasses.replace(
+            self,
+            _names=names,
+            _arrow=exp.arrow,
+            _edges=exp.edges,
+            _tensor=exp.tensor,
+        )
+
+    def identity(self, pairs: set[tuple[str, str]]) -> NamedGrassmannTensor:
+        names, left_idx, right_idx = self._get_left_right_indices(pairs)
+
+        identity = self.gt.identity((left_idx, right_idx))
+
+        return dataclasses.replace(
+            self,
+            _names=names,
+            _arrow=identity.arrow,
+            _edges=identity.edges,
+            _tensor=identity.tensor,
+        )
+
+    def svd(
+        self,
+        free_names_u: set[str],
+        common_name_u: str,
+        common_name_v: str,
+        singular_name_u: str,
+        singular_name_v: str,
+        *,
+        cutoff: int | None | tuple[int, int] = None,
+    ) -> tuple[NamedGrassmannTensor, NamedGrassmannTensor, NamedGrassmannTensor]:
+        free_names_u_indices = tuple(self.get_name_index(name) for name in free_names_u)
+        u, s, vh = self.gt.svd(free_names_u_indices, cutoff=cutoff)
+
+        left_names = tuple(self.names[i] for i in free_names_u_indices)
+        right_names = tuple(
+            name for i, name in enumerate(self.names) if i not in set(free_names_u_indices)
+        )
+
+        U = NamedGrassmannTensor(
+            _names=left_names + (common_name_u,),
+            _arrow=u.arrow,
+            _edges=u.edges,
+            _tensor=u.tensor,
+        )
+        S = NamedGrassmannTensor(
+            _names=(singular_name_u, singular_name_v),
+            _arrow=s.arrow,
+            _edges=s.edges,
+            _tensor=s.tensor,
+        )
+        Vh = NamedGrassmannTensor(
+            _names=(common_name_v,) + right_names,
+            _arrow=vh.arrow,
+            _edges=vh.edges,
+            _tensor=vh.tensor,
+        )
+
+        return U, S, Vh
+
+    def contract(
+        self,
+        other: NamedGrassmannTensor,
+        contract_pairs: set[tuple[str, str]],
+    ) -> NamedGrassmannTensor:
+        assert contract_pairs, "contract_pairs must be non-empty"
+
+        for pair in contract_pairs:
+            assert (
+                isinstance(pair, tuple) and len(pair) == 2 and all(isinstance(x, str) for x in pair)
+            ), f"Each contract pair must be (str, str), got: {pair!r}"
+
+        names_a = [a for a, _ in contract_pairs]
+        names_b = [b for _, b in contract_pairs]
+        assert len(names_a) == len(set(names_a)), f"Duplicate names on A side: {names_a}"
+        assert len(names_b) == len(set(names_b)), f"Duplicate names on B side: {names_b}"
+
+        assert all(a_name in self.names for a_name in names_a), (
+            "Some names of self side not in name list."
+        )
+        assert all(b_name in other.names for b_name in names_b), (
+            "Some names of other side not in name list."
+        )
+
+        name_set_a = set(names_a)
+        name_set_b = set(names_b)
+
+        if self.tensor.numel() >= other.tensor.numel():
+            dict_map = {a: b for a, b in contract_pairs}
+            ordered_a = [name for name in self.names if name in name_set_a]
+            ordered_b = [dict_map[a] for a in ordered_a]
+        else:
+            dict_map = {b: a for a, b in contract_pairs}
+            ordered_b = [name for name in other.names if name in name_set_b]
+            ordered_a = [dict_map[b] for b in ordered_b]
+
+        assert all(
+            self.edges[self.get_name_index(name_a)] == other.edges[other.get_name_index(name_b)]
+            for name_a, name_b in zip(ordered_a, ordered_b)
+        ), "Contract edges must be same."
+
+        leg_a = tuple(self.get_name_index(name) for name in ordered_a)
+        leg_b = tuple(other.get_name_index(name) for name in ordered_b)
+
+        c = self.gt.contract(other.gt, leg_a, leg_b)
+
+        contract_set_a = set(ordered_a)
+        contract_set_b = set(ordered_b)
+        names = tuple(name for name in self.names if name not in contract_set_a) + tuple(
+            name for name in other.names if name not in contract_set_b
+        )
+
+        return NamedGrassmannTensor(
+            _names=names,
+            _arrow=c.arrow,
+            _edges=c.edges,
+            _tensor=c.tensor,
+            _parity=None,
+            _mask=None,
+        )
+
+    def reciprocal(self) -> NamedGrassmannTensor:
+        return dataclasses.replace(
+            self, _tensor=torch.where(self.tensor == 0, self.tensor, 1 / self.tensor)
+        )
+
+    def _validate_edge_compatibility(self, other: NamedGrassmannTensor) -> None:
+        assert self._names == other.names, (
+            f"Names must match for arithmetic operations. Got {self._names} and {other.names}."
+        )
+        assert self._arrow == other.arrow, (
+            f"Arrows must match for arithmetic operations. Got {self._arrow} and {other.arrow}."
+        )
+        assert self._edges == other.edges, (
+            f"Edges must match for arithmetic operations. Got {self._edges} and {other.edges}."
+        )
+
+    def __pos__(self) -> NamedGrassmannTensor:
+        return dataclasses.replace(
+            self,
+            _tensor=+self._tensor,
+        )
+
+    def __neg__(self) -> NamedGrassmannTensor:
+        return dataclasses.replace(
+            self,
+            _tensor=-self._tensor,
+        )
+
+    def __add__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            return dataclasses.replace(
+                self,
+                _tensor=self._tensor + other._tensor,
+            )
+        try:
+            result = self._tensor + other
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __radd__(self, other: typing.Any) -> NamedGrassmannTensor:
+        try:
+            result = other + self._tensor
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __iadd__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            self._tensor += other._tensor
+            return self
+        try:
+            self._tensor += other
+        except TypeError:
+            return NotImplemented
+        if isinstance(self._tensor, torch.Tensor):
+            return self
+        return NotImplemented
+
+    def __sub__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            return dataclasses.replace(
+                self,
+                _tensor=self._tensor - other._tensor,
+            )
+        try:
+            result = self._tensor - other
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __rsub__(self, other: typing.Any) -> NamedGrassmannTensor:
+        try:
+            result = other - self._tensor
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __isub__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            self._tensor -= other._tensor
+            return self
+        try:
+            self._tensor -= other
+        except TypeError:
+            return NotImplemented
+        if isinstance(self._tensor, torch.Tensor):
+            return self
+        return NotImplemented
+
+    def __mul__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            return dataclasses.replace(
+                self,
+                _tensor=self._tensor * other._tensor,
+            )
+        try:
+            result = self._tensor * other
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __rmul__(self, other: typing.Any) -> NamedGrassmannTensor:
+        try:
+            result = other * self._tensor
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __imul__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            self._tensor *= other._tensor
+            return self
+        try:
+            self._tensor *= other
+        except TypeError:
+            return NotImplemented
+        if isinstance(self._tensor, torch.Tensor):
+            return self
+        return NotImplemented
+
+    def __truediv__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            return dataclasses.replace(
+                self,
+                _tensor=self._tensor / other._tensor,
+            )
+        try:
+            result = self._tensor / other
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __rtruediv__(self, other: typing.Any) -> NamedGrassmannTensor:
+        try:
+            result = other / self._tensor
+        except TypeError:
+            return NotImplemented
+        if isinstance(result, torch.Tensor):
+            return dataclasses.replace(
+                self,
+                _tensor=result,
+            )
+        return NotImplemented
+
+    def __itruediv__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            self._validate_edge_compatibility(other)
+            self._tensor /= other._tensor
+            return self
+        try:
+            self._tensor /= other
+        except TypeError:
+            return NotImplemented
+        if isinstance(self._tensor, torch.Tensor):
+            return self
+        return NotImplemented
+
+    def __matmul__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            return self.matmul(other)
+        return NotImplemented
+
+    def __rmatmul__(self, other: typing.Any) -> NamedGrassmannTensor:
+        return NotImplemented
+
+    def __imatmul__(self, other: typing.Any) -> NamedGrassmannTensor:
+        if isinstance(other, NamedGrassmannTensor):
+            return self.matmul(other)
+        return NotImplemented
+
+    def clone(self) -> NamedGrassmannTensor:
+        """
+        Create a deep copy of the Grassmann tensor.
+        """
+        return dataclasses.replace(
+            self,
+            _tensor=self._tensor.clone(),
+            _parity=tuple(parity.clone() for parity in self._parity)
+            if self._parity is not None
+            else None,
+            _mask=self._mask.clone() if self._mask is not None else None,
+        )
+
+    def __copy__(self) -> NamedGrassmannTensor:
+        return self.clone()
+
+    def __deepcopy__(self, memo: dict) -> NamedGrassmannTensor:
         return self.clone()
