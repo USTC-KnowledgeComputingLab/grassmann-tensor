@@ -174,6 +174,15 @@ def test_named_tensor_exponential_assertation() -> None:
             ),
             {("a", "c"), ("b", "d")},
         ),
+        (
+            NamedGrassmannTensor(
+                ("a", "b", "c", "d"),
+                (False, True, False, True),
+                ((4, 4), (4, 4), (8, 8), (8, 8)),
+                torch.randn(8, 8, 16, 16, dtype=torch.float64),
+            ),
+            {("a", "b"), ("c", "d")},
+        ),
     ],
 )
 def test_named_tensor_exponential_via_taylor_expansion(
