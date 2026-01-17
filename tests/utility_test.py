@@ -115,3 +115,54 @@ def test_rank() -> None:
         ("a", "b"), (False, False), ((1, 1), (1, 1)), torch.Tensor([[-4, 9], [0, -1]])
     )
     assert tensor.rank() == 2
+
+
+def test_allclose() -> None:
+    data1 = torch.Tensor([[0, 1], [2, 3]]).to(dtype=torch.float64, device="cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    data2 = torch.Tensor([[0, -1], [-2, 3]]).to(dtype=torch.float64, device=device)
+    tensor1 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data1)
+    tensor2 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data2)
+    assert tensor1.allclose(tensor2)
+
+    tensor3 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), torch.randn(2, 2))
+    tensor4 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), torch.randn(2, 2))
+    assert not tensor3.allclose(tensor4)
+
+    data = generate_filled_data(((1, 1), (1, 1)))
+    tensor5 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data)
+    tensor6 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data)
+    tensor6 = tensor6.permute(("b", "a"))
+    assert tensor5.allclose(tensor6)
+
+
+def test_allclose_other_type() -> None:
+    data = generate_filled_data(((1, 1), (1, 1)))
+    tensor1 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data)
+    tensor2 = data
+    with pytest.raises(TypeError, match="Expected NamedGrassmannTensor"):
+        tensor1.allclose(tensor2)  # type: ignore[arg-type]
+
+
+def test_allclose_mismatch_names() -> None:
+    data = generate_filled_data(((1, 1), (1, 1)))
+    tensor1 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data)
+    tensor2 = NamedGrassmannTensor(("c", "d"), (False, True), ((1, 1), (1, 1)), data)
+    with pytest.raises(TypeError, match="Expected same name"):
+        tensor1.allclose(tensor2)
+
+
+def test_allclose_mismatch_arrows() -> None:
+    data = generate_filled_data(((1, 1), (1, 1)))
+    tensor1 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data)
+    tensor2 = NamedGrassmannTensor(("a", "b"), (False, False), ((1, 1), (1, 1)), data)
+    with pytest.raises(TypeError, match="Expected same arrow"):
+        tensor1.allclose(tensor2)
+
+
+def test_allclose_mismatch_edges() -> None:
+    data = generate_filled_data(((1, 1), (1, 1)))
+    tensor1 = NamedGrassmannTensor(("a", "b"), (False, True), ((1, 1), (1, 1)), data)
+    tensor2 = NamedGrassmannTensor(("a", "b"), (False, True), ((2, 0), (0, 2)), data)
+    with pytest.raises(TypeError, match="Expected same edges"):
+        tensor1.allclose(tensor2)

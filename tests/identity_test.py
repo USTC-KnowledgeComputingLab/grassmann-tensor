@@ -138,6 +138,15 @@ def test_named_tensor_identity_assertation() -> None:
             ),
             {("a", "c"), ("b", "d")},
         ),
+        (
+            NamedGrassmannTensor(
+                ("a", "b", "c", "d"),
+                (False, True, False, True),
+                ((4, 4), (4, 4), (8, 8), (8, 8)),
+                torch.randn(8, 8, 16, 16, dtype=torch.float64),
+            ),
+            {("a", "b"), ("c", "d")},
+        ),
     ],
 )
 def test_named_tensor_identity_via_self_multiplication(
@@ -147,6 +156,6 @@ def test_named_tensor_identity_via_self_multiplication(
     tensor = tensor.update_mask()
     identity = tensor.identity(pairs)
     contract_pairs = typing.cast(set[tuple[str, str]], {item[::-1] for item in pairs})
-    assert torch.allclose((identity.contract(identity, contract_pairs)).tensor, identity.tensor)
-    assert torch.allclose((identity.contract(tensor, contract_pairs)).tensor, tensor.tensor)
-    assert torch.allclose((tensor.contract(identity, contract_pairs)).tensor, tensor.tensor)
+    assert identity.contract(identity, contract_pairs).allclose(identity)
+    assert (identity.contract(tensor, contract_pairs)).allclose(tensor)
+    assert (tensor.contract(identity, contract_pairs)).allclose(tensor)

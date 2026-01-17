@@ -164,7 +164,7 @@ class GrassmannTensor:
             _mask=mask,
         )
 
-    def reverse(self, indices: tuple[int, ...]) -> GrassmannTensor:
+    def reverse(self, indices: tuple[int, ...], apply_parity: bool = True) -> GrassmannTensor:
         """
         Reverse the specified indices of the Grassmann tensor.
 
@@ -184,7 +184,7 @@ class GrassmannTensor:
             (
                 self._unsqueeze(parity, index, self.tensor.dim())
                 for index, parity in enumerate(self.parity)
-                if index in indices and self.arrow[index]
+                if index in indices and self.arrow[index] is apply_parity
             ),
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
@@ -665,7 +665,7 @@ class GrassmannTensor:
 
         arrow_reverse = tuple(i for i, current in enumerate(tensor.arrow) if current)
         if arrow_reverse:
-            tensor = tensor.reverse(arrow_reverse).reverse(arrow_reverse).reverse(arrow_reverse)
+            tensor = tensor.reverse(arrow_reverse, apply_parity=False)
 
         left_dim = math.prod(tensor.tensor.shape[: len(left_legs)])
         right_dim = math.prod(tensor.tensor.shape[len(left_legs) :])
@@ -947,7 +947,9 @@ class GrassmannTensor:
         c = dataclasses.replace(c, _arrow=arrow, _edges=edges, _tensor=c.tensor.reshape(shape))
         return c
 
-    def exponential(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
+    def exponential(
+        self, pairs: tuple[tuple[int, ...], tuple[int, ...]], *, permute_back: bool = True
+    ) -> GrassmannTensor:
         tensor, left_legs, right_legs = self._group_edges(pairs)
 
         assert tensor.arrow in ((False, True), (True, False)), (
@@ -956,7 +958,7 @@ class GrassmannTensor:
 
         tensor_reverse_flag = tensor.arrow != (False, True)
         if tensor_reverse_flag:
-            tensor = tensor.reverse((0, 1))
+            tensor = tensor.reverse((0, 1), False)
 
         left_dim, right_dim = tensor.tensor.shape
 
@@ -988,13 +990,16 @@ class GrassmannTensor:
         edges_after_permute = tuple(self.edges[i] for i in order)
         tensor_exp = tensor_exp.reshape(edges_after_permute)
 
-        inv_order = self.get_inv_order(order)
+        if permute_back:
+            inv_order = self.get_inv_order(order)
 
-        tensor_exp = tensor_exp.permute(inv_order)
+            tensor_exp = tensor_exp.permute(inv_order)
 
         return tensor_exp
 
-    def identity(self, pairs: tuple[tuple[int, ...], tuple[int, ...]]) -> GrassmannTensor:
+    def identity(
+        self, pairs: tuple[tuple[int, ...], tuple[int, ...]], *, permute_back: bool = True
+    ) -> GrassmannTensor:
         tensor, left_legs, right_legs = self._group_edges(pairs)
 
         assert tensor.arrow in ((False, True), (True, False)), (
@@ -1003,7 +1008,7 @@ class GrassmannTensor:
 
         tensor_reverse_flag = tensor.arrow != (False, True)
         if tensor_reverse_flag:
-            tensor = tensor.reverse((0, 1))
+            tensor = tensor.reverse((0, 1), False)
 
         left_dim, right_dim = tensor.tensor.shape
 
@@ -1029,9 +1034,10 @@ class GrassmannTensor:
         edges_after_permute = tuple(self.edges[i] for i in order)
         tensor_identity = tensor_identity.reshape(edges_after_permute)
 
-        inv_order = self.get_inv_order(order)
+        if permute_back:
+            inv_order = self.get_inv_order(order)
 
-        tensor_identity = tensor_identity.permute(inv_order)
+            tensor_identity = tensor_identity.permute(inv_order)
 
         return tensor_identity
 
@@ -1453,12 +1459,12 @@ class NamedGrassmannTensor:
             _mask=None,
         )
 
-    def reverse(self, reversed_names: set[str]) -> NamedGrassmannTensor:
+    def reverse(self, reversed_names: set[str], apply_parity: bool = True) -> NamedGrassmannTensor:
         assert len(reversed_names) == len(set(reversed_names)), (
             f"Indices must be unique, but got {reversed_names}"
         )
         indices = tuple(self.get_name_index(name) for name in reversed_names)
-        tensor = self.gt.reverse(indices)
+        tensor = self.gt.reverse(indices, apply_parity=apply_parity)
         return dataclasses.replace(
             self,
             _arrow=tensor.arrow,
@@ -1713,7 +1719,7 @@ class NamedGrassmannTensor:
     def exponential(self, pairs: set[tuple[str, str]]) -> NamedGrassmannTensor:
         names, left_idx, right_idx = self._get_left_right_indices(pairs)
 
-        exp = self.gt.exponential((left_idx, right_idx))
+        exp = self.gt.exponential((left_idx, right_idx), permute_back=False)
 
         return dataclasses.replace(
             self,
@@ -1726,7 +1732,7 @@ class NamedGrassmannTensor:
     def identity(self, pairs: set[tuple[str, str]]) -> NamedGrassmannTensor:
         names, left_idx, right_idx = self._get_left_right_indices(pairs)
 
-        identity = self.gt.identity((left_idx, right_idx))
+        identity = self.gt.identity((left_idx, right_idx), permute_back=False)
 
         return dataclasses.replace(
             self,
@@ -1849,6 +1855,36 @@ class NamedGrassmannTensor:
 
     def rank(self) -> int:
         return len(self.names)
+
+    def allclose(
+        self, other: NamedGrassmannTensor, rtol: float = 1e-05, atol: float = 1e-8
+    ) -> bool:
+        if not isinstance(other, NamedGrassmannTensor):
+            raise TypeError(f"Expected NamedGrassmannTensor, got {type(other)}")
+        if set(self._names) != set(other._names):
+            raise TypeError(
+                f"Expected same name, but got self: {set(self._names)}, other: {set(other._names)}"
+            )
+
+        if tuple(self._names) != tuple(other._names):
+            other = other.permute(self._names)
+
+        if self._arrow != other._arrow:
+            raise TypeError(
+                f"Expected same arrow, but got self: {self._arrow}, other: {other._arrow}"
+            )
+
+        if self._edges != other._edges:
+            raise TypeError(
+                f"Expected same edges, but got self: {self._edges}, other: {other._edges}"
+            )
+
+        tensor_a = self.update_mask()._tensor
+        tensor_b = other.update_mask()._tensor
+
+        tensor_b = tensor_b.to(tensor_a.device)
+
+        return tensor_a.allclose(tensor_b, rtol=rtol, atol=atol)
 
     def _validate_edge_compatibility(self, other: NamedGrassmannTensor) -> None:
         assert self._names == other.names, (
