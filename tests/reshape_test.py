@@ -170,6 +170,30 @@ def test_reshape_equal_edges_nontrivial_merging() -> None:
     _ = a.reshape(((3, 1),))
 
 
+def test_reshape_pure_even_merging() -> None:
+    arrow = (True, True, True)
+    edges = ((2, 2), (2, 2), (0, 1))
+    a = GrassmannTensor(arrow, edges, torch.randn([4, 4, 1]))
+    _ = a.reshape(((8, 8),))
+
+
+def test_reshape_pure_even_splitting() -> None:
+    arrow = (True, True)
+    edges = ((2, 2), (2, 2))
+    a = GrassmannTensor(arrow, edges, torch.randn([4, 4]))
+    _ = a.reshape(((2, 2), (2, 2), (0, 1)))
+
+
+def test_reshape_merging_plan_exhausted_self_remaining_nontrivial() -> None:
+    arrow = (True, True, True)
+    edges = ((2, 2), (2, 2), (0, 2))
+    a = GrassmannTensor(arrow, edges, torch.randn([4, 4, 2]))
+    with pytest.raises(
+        ValueError, match="New shape exhausted but self still has non-trivial dimensions"
+    ):
+        _ = a.reshape(((8, 8),))
+
+
 def test_reshape_equal_edges_nontrivial_merging_with_other_edge() -> None:
     arrow = (True, True, True, True)
     edges = ((1, 3), (1, 0), (0, 1), (2, 2))
@@ -229,7 +253,7 @@ def test_reshape_with_one_dimension(
 
 def test_reshape_trailing_nontrivial_dim_raises() -> None:
     a = GrassmannTensor((True,), ((2, 2),), torch.randn([4]))
-    with pytest.raises(AssertionError, match="New shape exceeds after exhausting self dimensions"):
+    with pytest.raises(ValueError, match="New shape exceeds after exhausting self dimensions"):
         _ = a.reshape((-1, (2, 2)))
 
 
@@ -393,6 +417,22 @@ def test_named_tensor_equal_edges_nontrivial_merging() -> None:
     edges = ((1, 3), (1, 0), (0, 1))
     a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 1, 1]))
     _ = a.merge_edge({"a": ("a", "b", "c")})
+
+
+def test_named_tensor_pure_even_merging() -> None:
+    names = ("a", "b", "c")
+    arrow = (True, True, True)
+    edges = ((2, 2), (2, 2), (0, 1))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 4, 1]))
+    _ = a.merge_edge({"b": ("b", "c")})
+
+
+def test_named_tensor_pure_even_splitting() -> None:
+    names = ("a", "b")
+    arrow = (True, True)
+    edges = ((2, 2), (2, 2))
+    a = NamedGrassmannTensor(names, arrow, edges, torch.randn([4, 4]))
+    _ = a.split_edge({"b": (("b", (2, 2)), ("c", (0, 1)))})
 
 
 def test_named_tensor_equal_edges_nontrivial_merging_with_other_edge() -> None:

@@ -307,18 +307,23 @@ class GrassmannTensor:
         while cursor_plan != len(new_shape) or cursor_self != self.tensor.dim():
             if cursor_self == self.tensor.dim() and cursor_plan != len(new_shape):
                 new_shape_check = new_shape[cursor_plan]
-                if (isinstance(new_shape_check, int) and new_shape_check == 1) or (
-                    new_shape_check == (1, 0)
+                if (
+                    (isinstance(new_shape_check, int) and new_shape_check == 1)
+                    or new_shape_check == (1, 0)
+                    or new_shape_check == (0, 1)
                 ):
                     if cursor_plan < len(self.arrow):
                         arrow.append(self.arrow[cursor_plan])
                     else:
                         arrow.append(False)
-                    edges.append((1, 0))
+                    if new_shape_check == (0, 1):
+                        edges.append((0, 1))
+                    else:
+                        edges.append((1, 0))
                     shape.append(1)
                     cursor_plan += 1
                     continue
-                raise AssertionError(
+                raise ValueError(
                     "New shape exceeds after exhausting self dimensions: "
                     f"edges={self.edges}, new_shape={new_shape}"
                 )
@@ -359,6 +364,14 @@ class GrassmannTensor:
                 # A trivial self edge
                 cursor_self += 1
                 continue
+            if cursor_plan == len(new_shape) and cursor_self != self.tensor.dim():
+                if self.tensor.shape[cursor_self] == 1:
+                    cursor_self += 1
+                    continue
+                raise ValueError(
+                    "New shape exhausted but self still has non-trivial dimensions: "
+                    f"edges={self.edges}, new_shape={new_shape}, cursor_self={cursor_self}"
+                )
             cursor_new_shape = new_shape[cursor_plan]
             total = (
                 cursor_new_shape
@@ -493,7 +506,6 @@ class GrassmannTensor:
             torch.zeros([], dtype=torch.bool, device=self.tensor.device),
         )
         tensor = torch.where(splitting_parity, -tensor, +tensor)
-
         tensor = tensor.reshape(shape)
 
         merging_parity = functools.reduce(
